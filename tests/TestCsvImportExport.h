@@ -1,6 +1,5 @@
 /*
- *  Copyright (C) 2015 Florian Geyer <blueice@fobos.de>
- *  Copyright (C) 2015 Felix Geyer <debfx@fobos.de>
+ *  Copyright (C) 2024 KeePassXC Team <team@keepassxc.org>
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,34 +15,33 @@
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef KEEPASSX_TESTCSVEXPORTER_H
-#define KEEPASSX_TESTCSVEXPORTER_H
+#ifndef KEEPASSX_TESTCSVIMPORTEXPORT_H
+#define KEEPASSX_TESTCSVIMPORTEXPORT_H
 
 #include <QObject>
 #include <QSharedPointer>
 
-class Database;
+#include "core/Database.h"
+
 class CsvExporter;
 
-class TestCsvExporter : public QObject
+class TestCsvImportExport : public QObject
 {
     Q_OBJECT
 
-public:
-    static const QString ExpectedHeaderLine;
-
 private slots:
-    void init();
     void initTestCase();
+    void init();
     void cleanup();
-    void testExport();
-    void testEmptyDatabase();
-    void testNestedGroups();
-    void testExportImportRoundTrip();
+
+    void testRoundTripWithCustomRootName();
+    void testRoundTripWithDefaultRootName();
+    void testSingleLevelGroup();
+    void testAbsolutePaths();
 
 private:
     QSharedPointer<Database> m_db;
     QSharedPointer<CsvExporter> m_csvExporter;
 };
 
-#endif // KEEPASSX_TESTCSVEXPORTER_H
+#endif // KEEPASSX_TESTCSVIMPORTEXPORT_H
