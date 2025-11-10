@@ -21,6 +21,7 @@
 #cmakedefine WITH_XC_KEESHARE
 #cmakedefine WITH_XC_UPDATECHECK
 #cmakedefine WITH_XC_FDOSECRETS
+#cmakedefine WITH_XC_WEBDAV
 #cmakedefine WITH_XC_DOCS
 #cmakedefine WITH_XC_X11
 #cmakedefine WITH_XC_BOTAN3

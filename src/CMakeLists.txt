@@ -23,6 +23,7 @@ add_feature_info(Passkeys WITH_XC_BROWSER_PASSKEYS "Passkeys support for browser
 add_feature_info(SSHAgent WITH_XC_SSHAGENT "SSH agent integration compatible with KeeAgent")
 add_feature_info(KeeShare WITH_XC_KEESHARE "Sharing integration with KeeShare")
 add_feature_info(YubiKey WITH_XC_YUBIKEY "YubiKey HMAC-SHA1 challenge-response")
+add_feature_info(WebDAV WITH_XC_WEBDAV "Open and save databases over WebDAV with basic authentication")
 add_feature_info(UpdateCheck WITH_XC_UPDATECHECK "Automatic update checking")
 if(UNIX AND NOT APPLE)
     add_feature_info(FdoSecrets WITH_XC_FDOSECRETS "Implement freedesktop.org Secret Storage Spec server side API.")
@@ -104,6 +105,11 @@ set(core_SOURCES
         streams/StoreDataStream.cpp
         streams/SymmetricCipherStream.cpp)
 
+if(WITH_XC_WEBDAV)
+    list(APPEND core_SOURCES
+        core/remote/WebDavClient.cpp)
+endif()
+
 set(gui_SOURCES
         gui/styles/styles.qrc
         gui/styles/StateColorPalette.cpp
@@ -124,6 +130,7 @@ set(gui_SOURCES
         gui/DatabaseWidgetStateSync.cpp
         gui/EntryPreviewWidget.cpp
         gui/DialogyWidget.cpp
+        gui/dialogs/WebDavOpenDialog.cpp
         gui/EditWidget.cpp
         gui/EditWidgetIcons.cpp
         gui/EditWidgetProperties.cpp
@@ -383,6 +390,10 @@ target_link_libraries(keepassxc_core
         ${ARGON2_LIBRARIES}
         ${KEYUTILS_LIBRARIES}
         ${thirdparty_LIBRARIES})
+
+if(WITH_XC_WEBDAV)
+    target_link_libraries(keepassxc_core Qt5::Network)
+endif()
 
 # GUI Library Definition
 add_library(keepassxc_gui STATIC ${gui_SOURCES})

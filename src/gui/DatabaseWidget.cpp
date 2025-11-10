@@ -367,6 +367,9 @@ QString DatabaseWidget::displayName() const
 QString DatabaseWidget::displayFileName() const
 {
     if (m_db) {
+        if (m_db->hasRemoteFile()) {
+            return m_db->remoteFileConfig().url.fileName();
+        }
         QFileInfo fileinfo(m_db->filePath());
         return fileinfo.fileName();
     }
@@ -376,6 +379,9 @@ QString DatabaseWidget::displayFileName() const
 QString DatabaseWidget::displayFilePath() const
 {
     if (m_db) {
+        if (m_db->hasRemoteFile()) {
+            return m_db->filePath();
+        }
         return m_db->canonicalFilePath();
     }
     return {};
@@ -1628,7 +1634,7 @@ void DatabaseWidget::switchToOpenDatabase()
 
 void DatabaseWidget::switchToOpenDatabase(const QString& filePath)
 {
-    m_databaseOpenWidget->load(filePath);
+    m_databaseOpenWidget->load(filePath, m_db->remoteFileConfig());
     setCurrentWidget(m_databaseOpenWidget);
 }
 
@@ -2145,6 +2151,9 @@ bool DatabaseWidget::lock()
     switchToOpenDatabase(m_db->filePath());
 
     auto newDb = QSharedPointer<Database>::create(m_db->filePath());
+    if (m_db->hasRemoteFile()) {
+        newDb->setRemoteFileConfig(m_db->remoteFileConfig());
+    }
     newDb->open(nullptr);
     replaceDatabase(newDb);
 
@@ -2251,6 +2260,9 @@ void DatabaseWidget::reloadDatabaseFile(bool triggeredBySave)
     };
 
     auto db = QSharedPointer<Database>::create(m_db->filePath());
+    if (m_db->hasRemoteFile()) {
+        db->setRemoteFileConfig(m_db->remoteFileConfig());
+    }
     bool openResult = db->open(database()->key());
 
     // skip if the db is unchanged, or the db file is gone or for sure not a kp-db

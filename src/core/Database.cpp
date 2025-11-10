@@ -27,6 +27,11 @@
 #include "format/KeePass2Writer.h"
 #include "streams/HashingStream.h"
 
+#ifdef WITH_XC_WEBDAV
+#include "core/remote/WebDavClient.h"
+#endif
+
+#include <QBuffer>
 #include <QFileInfo>
 #include <QJsonObject>
 #include <QRegularExpression>
@@ -39,6 +44,31 @@
 #endif
 
 QHash<QUuid, QPointer<Database>> Database::s_uuidMap;
+
+namespace
+{
+#ifdef WITH_XC_WEBDAV
+    bool isRemoteWebDavScheme(const QString& scheme)
+    {
+        return scheme.compare(QStringLiteral("http"), Qt::CaseInsensitive) == 0
+               || scheme.compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0
+               || scheme.compare(QStringLiteral("webdav"), Qt::CaseInsensitive) == 0
+               || scheme.compare(QStringLiteral("webdavs"), Qt::CaseInsensitive) == 0;
+    }
+
+    QUrl sanitizeRemoteUrl(const QUrl& url)
+    {
+        QUrl sanitized(url);
+        sanitized.setUserInfo(QString());
+        return sanitized;
+    }
+
+    QString normalizedRemotePath(const QUrl& url)
+    {
+        return sanitizeRemoteUrl(url).toString(QUrl::FullyEncoded);
+    }
+#endif
+} // namespace
 
 Database::Database()
     : m_metadata(new Metadata(this))
@@ -124,6 +154,14 @@ bool Database::open(QSharedPointer<const CompositeKey> key, QString* error)
  */
 bool Database::open(const QString& filePath, QSharedPointer<const CompositeKey> key, QString* error)
 {
+#ifdef WITH_XC_WEBDAV
+    QUrl urlCandidate(filePath);
+    if (hasRemoteFile()
+        || (urlCandidate.isValid() && isRemoteWebDavScheme(urlCandidate.scheme()))) {
+        return openFromWebDav(filePath, std::move(key), error);
+    }
+#endif
+
     if (filePath.isEmpty()) {
         if (error) {
             *error = tr("No file path was provided.");
@@ -188,6 +226,168 @@ bool Database::open(const QString& filePath, QSharedPointer<const CompositeKey> 
 
     return true;
 }
+
+#ifdef WITH_XC_WEBDAV
+bool Database::openFromWebDav(const QString& filePath,
+                              QSharedPointer<const CompositeKey> key,
+                              QString* error)
+{
+    RemoteFileConfig config = m_data.remoteFile;
+    QUrl url(filePath);
+    if (!url.isValid() || !isRemoteWebDavScheme(url.scheme())) {
+        if (error) {
+            *error = tr("Invalid WebDAV url: %1").arg(filePath);
+        }
+        return false;
+    }
+
+    if (config.type != RemoteFileConfig::Type::WebDav || !config.url.isValid()) {
+        config.type = RemoteFileConfig::Type::WebDav;
+        config.url = sanitizeRemoteUrl(url);
+        if (config.timeoutMsec <= 0) {
+            config.timeoutMsec = 30000;
+        }
+    }
+
+    setRemoteFileConfig(config);
+
+    WebDavClient::RequestOptions options;
+    options.url = config.url;
+    options.username = config.username;
+    options.password = config.password;
+    options.timeoutMsec = config.timeoutMsec <= 0 ? 30000 : config.timeoutMsec;
+
+    QByteArray payload;
+    WebDavClient client;
+    if (!client.download(options, payload, error)) {
+        return false;
+    }
+
+    QBuffer buffer(&payload);
+    if (!buffer.open(QIODevice::ReadOnly)) {
+        if (error) {
+            *error = tr("Unable to read remote database stream.");
+        }
+        return false;
+    }
+
+    setEmitModified(false);
+
+    m_fileBlockHash.clear();
+    if (payload.size() >= kFileBlockToHashSizeBytes) {
+        m_fileBlockHash =
+            QCryptographicHash::hash(payload.left(kFileBlockToHashSizeBytes), QCryptographicHash::Md5);
+    }
+
+    KeePass2Reader reader;
+    if (!reader.readDatabase(&buffer, std::move(key), this)) {
+        if (error) {
+            *error = tr("Error while reading the database: %1").arg(reader.errorString());
+        }
+        setEmitModified(true);
+        return false;
+    }
+
+    buffer.close();
+
+    setFilePath(normalizedRemotePath(config.url));
+    markAsClean();
+
+    emit databaseOpened();
+    setEmitModified(true);
+
+    return true;
+}
+#endif
+
+#ifdef WITH_XC_WEBDAV
+bool Database::saveToWebDav(const QString& filePath, SaveAction action, const QString& backupFilePath, QString* error)
+{
+    Q_UNUSED(action);
+    Q_UNUSED(backupFilePath);
+
+    if (!isInitialized()) {
+        if (error) {
+            *error = tr("Could not save, database has not been initialized!");
+        }
+        return false;
+    }
+
+    RemoteFileConfig config = m_data.remoteFile;
+    QUrl url(filePath);
+    if (!url.isValid() || !isRemoteWebDavScheme(url.scheme())) {
+        if (error) {
+            *error = tr("Invalid WebDAV url: %1").arg(filePath);
+        }
+        return false;
+    }
+
+    config.type = RemoteFileConfig::Type::WebDav;
+    config.url = sanitizeRemoteUrl(url);
+    if (config.timeoutMsec <= 0) {
+        config.timeoutMsec = 30000;
+    }
+
+    m_fileWatcher->stop();
+
+    int length = Random::instance()->randomUIntRange(64, 512);
+    m_metadata->customData()->set(CustomData::RandomSlug, Random::instance()->randomArray(length).toHex());
+
+    QMutexLocker locker(&m_saveMutex);
+
+    QBuffer buffer;
+    if (!buffer.open(QIODevice::ReadWrite)) {
+        if (error) {
+            *error = tr("Unable to initialize remote upload buffer.");
+        }
+        return false;
+    }
+
+    HashingStream hashingStream(&buffer, QCryptographicHash::Md5, kFileBlockToHashSizeBytes);
+    if (!hashingStream.open(QIODevice::WriteOnly)) {
+        if (error) {
+            *error = hashingStream.errorString();
+        }
+        return false;
+    }
+
+    if (!writeDatabase(&hashingStream, error)) {
+        return false;
+    }
+
+    hashingStream.close();
+
+    const QByteArray payload = buffer.buffer();
+
+    WebDavClient::RequestOptions options;
+    options.url = config.url;
+    options.username = config.username;
+    options.password = config.password;
+    options.timeoutMsec = config.timeoutMsec <= 0 ? 30000 : config.timeoutMsec;
+
+    WebDavClient client;
+    if (!client.upload(options, payload, error)) {
+        markAsModified();
+        return false;
+    }
+
+    QByteArray hash = hashingStream.hashingResult();
+    if (!hash.isEmpty()) {
+        m_fileBlockHash = hash;
+    } else {
+        m_fileBlockHash.clear();
+    }
+
+    buffer.close();
+
+    setRemoteFileConfig(config);
+    setFilePath(normalizedRemotePath(config.url));
+    markAsClean();
+    m_ignoreFileChangesUntilSaved = false;
+
+    return true;
+}
+#endif
 
 /**
  * KDBX format version.
@@ -277,6 +477,14 @@ bool Database::saveAs(const QString& filePath, SaveAction action, const QString&
         }
         return false;
     }
+
+#ifdef WITH_XC_WEBDAV
+    QUrl urlCandidate(filePath);
+    bool targetIsRemote = urlCandidate.isValid() && isRemoteWebDavScheme(urlCandidate.scheme());
+    if (targetIsRemote || (hasRemoteFile() && filePath == m_data.filePath)) {
+        return saveToWebDav(filePath, action, backupFilePath, error);
+    }
+#endif
 
     // Make sure we don't overwrite external modifications unless explicitly allowed
     if (!m_ignoreFileChangesUntilSaved && !m_fileBlockHash.isEmpty() && filePath == m_data.filePath) {
@@ -699,6 +907,11 @@ QString Database::filePath() const
  */
 QString Database::canonicalFilePath() const
 {
+#ifdef WITH_XC_WEBDAV
+    if (hasRemoteFile()) {
+        return m_data.filePath;
+    }
+#endif
     QFileInfo fileInfo(m_data.filePath);
     return fileInfo.canonicalFilePath();
 }
@@ -1191,6 +1404,35 @@ void Database::setPublicIcon(int iconIndex)
         publicCustomData().insert("KPXC_PUBLIC_ICON", iconIndex);
     }
     markAsModified();
+}
+
+void Database::setRemoteFileConfig(const RemoteFileConfig& config)
+{
+#ifdef WITH_XC_WEBDAV
+    if (config.type == RemoteFileConfig::Type::WebDav && config.url.isValid()
+        && isRemoteWebDavScheme(config.url.scheme())) {
+        RemoteFileConfig sanitized = config;
+        sanitized.url = sanitizeRemoteUrl(config.url);
+        m_data.remoteFile = std::move(sanitized);
+    } else
+#endif
+    {
+        m_data.remoteFile = config;
+    }
+}
+
+const Database::RemoteFileConfig& Database::remoteFileConfig() const
+{
+    return m_data.remoteFile;
+}
+
+bool Database::hasRemoteFile() const
+{
+#ifdef WITH_XC_WEBDAV
+    return m_data.remoteFile.type == RemoteFileConfig::Type::WebDav;
+#else
+    return false;
+#endif
 }
 
 void Database::markAsTemporaryDatabase()

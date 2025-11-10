@@ -19,12 +19,14 @@
 #define KEEPASSX_DATABASETABWIDGET_H
 
 #include "DatabaseOpenDialog.h"
+#include "core/Database.h"
 #include "config-keepassx.h"
 #include "gui/MessageWidget.h"
 #include "wizard/ImportWizard.h"
 
 #include <QTabWidget>
 #include <QTimer>
+#include <QHash>
 
 class Database;
 class DatabaseWidget;
@@ -54,6 +56,10 @@ public slots:
                         bool inBackground = false,
                         const QString& password = {},
                         const QString& keyfile = {});
+    void addDatabaseTab(const Database::RemoteFileConfig& remoteConfig,
+                        bool inBackground = false,
+                        const QString& password = {},
+                        const QString& keyfile = {});
     void addDatabaseTab(DatabaseWidget* dbWidget, bool inBackground = false);
     bool closeDatabaseTab(int index);
     bool closeDatabaseTab(DatabaseWidget* dbWidget);
@@ -64,6 +70,7 @@ public slots:
 
     DatabaseWidget* newDatabase();
     void openDatabase();
+    void openWebDavDatabase();
     void mergeDatabase();
     void importFile();
     bool saveDatabase(int index = -1);
@@ -127,6 +134,7 @@ private:
     QPointer<ImportWizard> m_importWizard;
     QTimer m_lockDelayTimer;
     bool m_databaseOpenInProgress;
+    QHash<QString, Database::RemoteFileConfig> m_pendingRemoteConfigs;
 };
 
 #endif // KEEPASSX_DATABASETABWIDGET_H

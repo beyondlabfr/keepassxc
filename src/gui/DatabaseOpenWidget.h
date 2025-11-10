@@ -26,6 +26,7 @@
 #include "config-keepassx.h"
 #include "gui/DialogyWidget.h"
 #include "gui/MessageWidget.h"
+#include "core/Database.h"
 #ifdef WITH_XC_YUBIKEY
 #include "osutils/DeviceListener.h"
 #endif
@@ -46,7 +47,7 @@ class DatabaseOpenWidget : public DialogyWidget
 public:
     explicit DatabaseOpenWidget(QWidget* parent = nullptr);
     ~DatabaseOpenWidget() override;
-    void load(const QString& filename);
+    void load(const QString& filename, const Database::RemoteFileConfig& remoteConfig = Database::RemoteFileConfig());
     QString filename();
     void clearForms();
     void enterKey(const QString& pw, const QString& keyFile);
@@ -73,6 +74,7 @@ protected:
     const QScopedPointer<Ui::DatabaseOpenWidget> m_ui;
     QSharedPointer<Database> m_db;
     QString m_filename;
+    Database::RemoteFileConfig m_remoteConfig;
     bool m_retryUnlockWithEmptyPassword = false;
 
 protected slots:

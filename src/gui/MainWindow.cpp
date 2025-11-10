@@ -30,8 +30,24 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QWindow>
+#ifdef WITH_XC_WEBDAV
+#include <QUrl>
+#endif
 
 #include "config-keepassx.h"
+
+#ifdef WITH_XC_WEBDAV
+namespace
+{
+    bool isRemoteWebDavScheme(const QString& scheme)
+    {
+        return scheme.compare(QStringLiteral("http"), Qt::CaseInsensitive) == 0
+               || scheme.compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0
+               || scheme.compare(QStringLiteral("webdav"), Qt::CaseInsensitive) == 0
+               || scheme.compare(QStringLiteral("webdavs"), Qt::CaseInsensitive) == 0;
+    }
+}
+#endif
 
 #include "Application.h"
 #include "Clipboard.h"
@@ -480,6 +496,11 @@ MainWindow::MainWindow()
 
     connect(m_ui->actionDatabaseNew, SIGNAL(triggered()), m_ui->tabWidget, SLOT(newDatabase()));
     connect(m_ui->actionDatabaseOpen, SIGNAL(triggered()), m_ui->tabWidget, SLOT(openDatabase()));
+#ifdef WITH_XC_WEBDAV
+    connect(m_ui->actionDatabaseOpenWebDav, SIGNAL(triggered()), m_ui->tabWidget, SLOT(openWebDavDatabase()));
+#else
+    m_ui->actionDatabaseOpenWebDav->setVisible(false);
+#endif
     connect(m_ui->actionDatabaseSave, SIGNAL(triggered()), m_ui->tabWidget, SLOT(saveDatabase()));
     connect(m_ui->actionDatabaseSaveAs, SIGNAL(triggered()), m_ui->tabWidget, SLOT(saveDatabaseAs()));
     connect(m_ui->actionDatabaseSaveBackup, SIGNAL(triggered()), m_ui->tabWidget, SLOT(saveDatabaseBackup()));
@@ -716,7 +737,17 @@ void MainWindow::restoreConfigState()
     if (config()->get(Config::OpenPreviousDatabasesOnStartup).toBool()) {
         const QStringList fileNames = config()->get(Config::LastOpenedDatabases).toStringList();
         for (const QString& filename : fileNames) {
-            if (!filename.isEmpty() && QFile::exists(filename)) {
+            if (filename.isEmpty()) {
+                continue;
+            }
+#ifdef WITH_XC_WEBDAV
+            const QUrl urlCandidate(filename);
+            if (urlCandidate.isValid() && isRemoteWebDavScheme(urlCandidate.scheme())) {
+                openDatabase(filename);
+                continue;
+            }
+#endif
+            if (QFile::exists(filename)) {
                 openDatabase(filename);
             }
         }
@@ -1553,7 +1584,15 @@ bool MainWindow::saveLastDatabases()
         for (int i = 0; i < m_ui->tabWidget->count(); ++i) {
             auto dbWidget = m_ui->tabWidget->databaseWidgetFromIndex(i);
             if (!dbWidget->database()->isTemporaryDatabase()) {
-                openDatabases.append(QDir::toNativeSeparators(dbWidget->database()->filePath()));
+                QString path = dbWidget->database()->filePath();
+#ifdef WITH_XC_WEBDAV
+                if (!dbWidget->database()->hasRemoteFile()) {
+                    path = QDir::toNativeSeparators(path);
+                }
+#else
+                path = QDir::toNativeSeparators(path);
+#endif
+                openDatabases.append(path);
             }
         }
 
@@ -2089,6 +2128,7 @@ void MainWindow::initActionCollection()
     ac->addActions({// Database Menu
                     m_ui->actionDatabaseNew,
                     m_ui->actionDatabaseOpen,
+                    m_ui->actionDatabaseOpenWebDav,
                     m_ui->actionDatabaseSave,
                     m_ui->actionDatabaseSaveAs,
                     m_ui->actionDatabaseSaveBackup,

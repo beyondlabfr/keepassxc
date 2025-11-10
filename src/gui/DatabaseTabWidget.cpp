@@ -19,12 +19,14 @@
 
 #include <QFileInfo>
 #include <QTabBar>
+#include <QUrl>
 
 #include "autotype/AutoType.h"
 #include "core/Merger.h"
 #include "core/Tools.h"
 #include "format/CsvExporter.h"
 #include "gui/Clipboard.h"
+#include "gui/dialogs/WebDavOpenDialog.h"
 #include "gui/DatabaseIcons.h"
 #include "gui/DatabaseOpenDialog.h"
 #include "gui/DatabaseWidget.h"
@@ -36,6 +38,26 @@
 #include "gui/osutils/macutils/MacUtils.h"
 #endif
 #include "gui/wizard/NewDatabaseWizard.h"
+
+namespace
+{
+#ifdef WITH_XC_WEBDAV
+    bool isRemoteWebDavScheme(const QString& scheme)
+    {
+        return scheme.compare(QStringLiteral("http"), Qt::CaseInsensitive) == 0
+               || scheme.compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0
+               || scheme.compare(QStringLiteral("webdav"), Qt::CaseInsensitive) == 0
+               || scheme.compare(QStringLiteral("webdavs"), Qt::CaseInsensitive) == 0;
+    }
+
+    QString normalizeRemotePath(const QUrl& url)
+    {
+        QUrl copy(url);
+        copy.setUserInfo(QString());
+        return copy.toString(QUrl::FullyEncoded);
+    }
+#endif
+} // namespace
 
 DatabaseTabWidget::DatabaseTabWidget(QWidget* parent)
     : QTabWidget(parent)
@@ -143,6 +165,25 @@ void DatabaseTabWidget::openDatabase()
     }
 }
 
+void DatabaseTabWidget::openWebDavDatabase()
+{
+#ifdef WITH_XC_WEBDAV
+    WebDavOpenDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    auto remoteConfig = dialog.remoteConfig();
+    if (!remoteConfig.url.isValid()) {
+        return;
+    }
+    const QString normalized = normalizeRemotePath(remoteConfig.url);
+    m_pendingRemoteConfigs.insert(normalized, remoteConfig);
+    addDatabaseTab(normalized);
+#else
+    emit messageGlobal(tr("WebDAV support is not available in this build."), MessageWidget::Error);
+#endif
+}
+
 /**
  * Add a new database tab or switch to an existing one if the
  * database has been opened already.
@@ -158,6 +199,30 @@ void DatabaseTabWidget::addDatabaseTab(const QString& filePath,
                                        const QString& password,
                                        const QString& keyfile)
 {
+#ifdef WITH_XC_WEBDAV
+    QUrl remoteUrl(filePath);
+    if (remoteUrl.isValid() && isRemoteWebDavScheme(remoteUrl.scheme())) {
+        const QString normalized = normalizeRemotePath(remoteUrl);
+        Database::RemoteFileConfig remoteConfig;
+        if (m_pendingRemoteConfigs.contains(normalized)) {
+            remoteConfig = m_pendingRemoteConfigs.take(normalized);
+        } else {
+            WebDavOpenDialog dialog(this);
+            dialog.setInitialUrl(remoteUrl);
+            if (dialog.exec() != QDialog::Accepted) {
+                return;
+            }
+            remoteConfig = dialog.remoteConfig();
+        }
+        if (!remoteConfig.url.isValid()) {
+            remoteConfig.url = remoteUrl;
+        }
+        remoteConfig.url = QUrl(normalizeRemotePath(remoteConfig.url));
+        addDatabaseTab(remoteConfig, inBackground, password, keyfile);
+        return;
+    }
+#endif
+
     QString cleanFilePath = QDir::toNativeSeparators(filePath);
     QFileInfo fileInfo(cleanFilePath);
     QString canonicalFilePath = fileInfo.canonicalFilePath();
@@ -186,6 +251,57 @@ void DatabaseTabWidget::addDatabaseTab(const QString& filePath,
     addDatabaseTab(dbWidget, inBackground);
     dbWidget->performUnlockDatabase(password, keyfile);
     updateLastDatabases(dbWidget->database());
+}
+
+void DatabaseTabWidget::addDatabaseTab(const Database::RemoteFileConfig& remoteConfig,
+                                       bool inBackground,
+                                       const QString& password,
+                                       const QString& keyfile)
+{
+#ifdef WITH_XC_WEBDAV
+    if (remoteConfig.type != Database::RemoteFileConfig::Type::WebDav || !remoteConfig.url.isValid()) {
+        return;
+    }
+
+    const QString normalized = normalizeRemotePath(remoteConfig.url);
+
+    for (int i = 0, c = count(); i < c; ++i) {
+        auto* existingWidget = databaseWidgetFromIndex(i);
+        if (!existingWidget || !existingWidget->database()->hasRemoteFile()) {
+            continue;
+        }
+        const QString existingNormalized =
+            normalizeRemotePath(existingWidget->database()->remoteFileConfig().url);
+        if (existingNormalized == normalized) {
+            existingWidget->database()->setRemoteFileConfig(remoteConfig);
+            if (!inBackground) {
+                setCurrentIndex(indexOf(existingWidget));
+            }
+            if (!password.isEmpty() || !keyfile.isEmpty()) {
+                existingWidget->performUnlockDatabase(password, keyfile);
+            } else {
+                existingWidget->switchToOpenDatabase();
+            }
+            return;
+        }
+    }
+
+    auto database = QSharedPointer<Database>::create();
+    database->setRemoteFileConfig(remoteConfig);
+    database->setFilePath(normalized);
+
+    auto* dbWidget = new DatabaseWidget(database, this);
+    addDatabaseTab(dbWidget, inBackground);
+    if (!password.isEmpty() || !keyfile.isEmpty()) {
+        dbWidget->performUnlockDatabase(password, keyfile);
+    }
+    updateLastDatabases(dbWidget->database());
+#else
+    Q_UNUSED(remoteConfig);
+    Q_UNUSED(inBackground);
+    Q_UNUSED(password);
+    Q_UNUSED(keyfile);
+#endif
 }
 
 /**
@@ -863,11 +979,18 @@ void DatabaseTabWidget::updateLastDatabases(const QSharedPointer<Database>& data
         return;
     }
     auto filename = database->filePath();
+#ifdef WITH_XC_WEBDAV
+    if (!database->hasRemoteFile()) {
+        filename = QDir::toNativeSeparators(filename);
+    }
+#else
+    filename = QDir::toNativeSeparators(filename);
+#endif
     if (!config()->get(Config::RememberLastDatabases).toBool()) {
         config()->remove(Config::LastDatabases);
     } else {
         QStringList lastDatabases = config()->get(Config::LastDatabases).toStringList();
-        lastDatabases.prepend(QDir::toNativeSeparators(filename));
+        lastDatabases.prepend(filename);
         lastDatabases.removeDuplicates();
 
         while (lastDatabases.count() > config()->get(Config::NumberOfRememberedLastDatabases).toInt()) {

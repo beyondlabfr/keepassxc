@@ -63,6 +63,14 @@ if(UNIX AND NOT APPLE)
 endif()
 option(WITH_XC_DOCS "Enable building of documentation" ON)
 
+option(WITH_XC_WEBDAV "Enable WebDAV remote database support." ON)
+if(WITH_XC_WEBDAV)
+    if(NOT WITH_XC_NETWORKING)
+        set(WITH_XC_NETWORKING ON CACHE BOOL "Include networking code (e.g. for downloading website icons)." FORCE)
+        message(STATUS "Enabling WITH_XC_NETWORKING because WITH_XC_WEBDAV is enabled")
+    endif()
+endif()
+
 set(WITH_XC_X11 ON CACHE BOOL "Enable building with X11 deps")
 
 if(APPLE)

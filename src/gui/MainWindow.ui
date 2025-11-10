@@ -247,6 +247,7 @@
     </widget>
     <addaction name="actionDatabaseNew"/>
     <addaction name="actionDatabaseOpen"/>
+    <addaction name="actionDatabaseOpenWebDav"/>
     <addaction name="menuRecentDatabases"/>
     <addaction name="actionDatabaseSave"/>
     <addaction name="actionDatabaseSaveAs"/>
@@ -490,6 +491,14 @@
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+O</string>
+   </property>
+  </action>
+  <action name="actionDatabaseOpenWebDav">
+   <property name="text">
+    <string>Open &amp;WebDAV Database…</string>
+   </property>
+   <property name="toolTip">
+    <string>Open a database stored on a WebDAV server</string>
    </property>
   </action>
   <action name="actionDatabaseSave">

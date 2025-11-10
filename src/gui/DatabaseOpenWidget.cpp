@@ -248,15 +248,18 @@ void DatabaseOpenWidget::showMessage(const QString& text, MessageWidget::Message
     m_ui->messageWidget->showMessage(text, type, autoHideTimeout);
 }
 
-void DatabaseOpenWidget::load(const QString& filename)
+void DatabaseOpenWidget::load(const QString& filename, const Database::RemoteFileConfig& remoteConfig)
 {
-    clearForms();
-
     m_filename = filename;
+    m_remoteConfig = remoteConfig;
+    clearForms();
 
     // Read public headers
     QString error;
     m_db.reset(new Database());
+    if (m_remoteConfig.type == Database::RemoteFileConfig::Type::WebDav) {
+        m_db->setRemoteFileConfig(m_remoteConfig);
+    }
     m_db->open(m_filename, nullptr, &error);
 
     m_ui->fileNameLabel->setRawText(m_filename);
@@ -314,6 +317,9 @@ void DatabaseOpenWidget::clearForms()
     toggleQuickUnlockScreen();
 
     m_db.reset(new Database(m_filename));
+    if (m_remoteConfig.type == Database::RemoteFileConfig::Type::WebDav) {
+        m_db->setRemoteFileConfig(m_remoteConfig);
+    }
 }
 
 QSharedPointer<Database> DatabaseOpenWidget::database()
@@ -358,6 +364,9 @@ void DatabaseOpenWidget::openDatabase()
 
     QString error;
     m_db.reset(new Database());
+    if (m_remoteConfig.type == Database::RemoteFileConfig::Type::WebDav) {
+        m_db->setRemoteFileConfig(m_remoteConfig);
+    }
     bool ok = m_db->open(m_filename, databaseKey, &error);
 
     if (ok) {
@@ -378,6 +387,9 @@ void DatabaseOpenWidget::openDatabase()
             msgBox->exec();
             if (msgBox->clickedButton() != btn) {
                 m_db.reset(new Database());
+                if (m_remoteConfig.type == Database::RemoteFileConfig::Type::WebDav) {
+                    m_db->setRemoteFileConfig(m_remoteConfig);
+                }
                 m_db->open(m_filename, nullptr, &error);
 
                 m_ui->messageWidget->showMessage(tr("Database unlock canceled."), MessageWidget::MessageType::Error);

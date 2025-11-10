@@ -24,6 +24,7 @@
 #include <QMutex>
 #include <QPointer>
 #include <QTimer>
+#include <QUrl>
 
 #include "config-keepassx.h"
 #include "core/ModifiableObject.h"
@@ -70,6 +71,21 @@ public:
         DirectWrite, // Directly write to the destination file (dangerous)
     };
 
+    struct RemoteFileConfig
+    {
+        enum class Type
+        {
+            None,
+            WebDav
+        };
+
+        Type type = Type::None;
+        QUrl url;
+        QString username;
+        QString password;
+        int timeoutMsec = 30000;
+    };
+
     Database();
     explicit Database(const QString& filePath);
     ~Database() override;
@@ -82,6 +98,10 @@ private:
     bool backupDatabase(const QString& filePath, const QString& destinationFilePath);
     bool restoreDatabase(const QString& filePath, const QString& fromBackupFilePath);
     bool performSave(const QString& filePath, SaveAction flags, const QString& backupFilePath, QString* error);
+#ifdef WITH_XC_WEBDAV
+    bool openFromWebDav(const QString& filePath, QSharedPointer<const CompositeKey> key, QString* error);
+    bool saveToWebDav(const QString& filePath, SaveAction action, const QString& backupFilePath, QString* error);
+#endif
 
 public:
     bool open(QSharedPointer<const CompositeKey> key, QString* error = nullptr);
@@ -121,6 +141,10 @@ public:
     void setPublicColor(const QString& color);
     int publicIcon();
     void setPublicIcon(int iconIndex);
+
+    void setRemoteFileConfig(const RemoteFileConfig& config);
+    const RemoteFileConfig& remoteFileConfig() const;
+    bool hasRemoteFile() const;
 
     Metadata* metadata();
     const Metadata* metadata() const;
@@ -208,6 +232,7 @@ private:
         QSharedPointer<Kdf> kdf;
 
         QVariantMap publicCustomData;
+        RemoteFileConfig remoteFile;
 
         DatabaseData()
         {
@@ -219,6 +244,7 @@ private:
             resetKeys();
             filePath.clear();
             publicCustomData.clear();
+            remoteFile = RemoteFileConfig();
         }
 
         void resetKeys()
