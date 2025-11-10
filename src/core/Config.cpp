@@ -90,6 +90,7 @@ static const QHash<Config::ConfigKey, ConfigDirective> configStrings = {
 
     {Config::LastDatabases, {QS("LastDatabases"), Local, {}}},
     {Config::LastKeyFiles, {QS("LastKeyFiles"), Local, {}}},
+    {Config::LastWebDavCredentials, {QS("LastWebDavCredentials"), Local, {}}},
     {Config::LastChallengeResponse, {QS("LastChallengeResponse"), Local, {}}},
     {Config::LastActiveDatabase, {QS("LastActiveDatabase"), Local, {}}},
     {Config::LastOpenedDatabases, {QS("LastOpenedDatabases"), Local, {}}},

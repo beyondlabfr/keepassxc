@@ -256,6 +256,7 @@ bool Database::openFromWebDav(const QString& filePath,
     options.username = config.username;
     options.password = config.password;
     options.timeoutMsec = config.timeoutMsec <= 0 ? 30000 : config.timeoutMsec;
+    options.useAuthentication = config.useAuthentication;
 
     QByteArray payload;
     WebDavClient client;
@@ -364,6 +365,7 @@ bool Database::saveToWebDav(const QString& filePath, SaveAction action, const QS
     options.username = config.username;
     options.password = config.password;
     options.timeoutMsec = config.timeoutMsec <= 0 ? 30000 : config.timeoutMsec;
+    options.useAuthentication = config.useAuthentication;
 
     WebDavClient client;
     if (!client.upload(options, payload, error)) {
@@ -1413,6 +1415,10 @@ void Database::setRemoteFileConfig(const RemoteFileConfig& config)
         && isRemoteWebDavScheme(config.url.scheme())) {
         RemoteFileConfig sanitized = config;
         sanitized.url = sanitizeRemoteUrl(config.url);
+        if (!sanitized.useAuthentication) {
+            sanitized.username.clear();
+            sanitized.password.clear();
+        }
         m_data.remoteFile = std::move(sanitized);
     } else
 #endif

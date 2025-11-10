@@ -73,6 +73,7 @@ public:
 
         LastDatabases,
         LastKeyFiles,
+        LastWebDavCredentials,
         LastChallengeResponse,
         LastActiveDatabase,
         LastOpenedDatabases,

@@ -127,6 +127,13 @@ private:
     void updateLastDatabases(const QSharedPointer<Database>& database);
     bool warnOnExport();
     void displayUnlockDialog();
+#ifdef WITH_XC_WEBDAV
+    void loadWebDavCredentials();
+    void persistWebDavCredentials() const;
+    Database::RemoteFileConfig storedWebDavConfig(const QString& normalizedPath) const;
+    void rememberWebDavConfig(const Database::RemoteFileConfig& config);
+    void forgetWebDavConfig(const QString& normalizedPath);
+#endif
 
     QPointer<DatabaseWidgetStateSync> m_dbWidgetStateSync;
     QPointer<DatabaseWidget> m_dbWidgetPendingLock;
@@ -134,7 +141,9 @@ private:
     QPointer<ImportWizard> m_importWizard;
     QTimer m_lockDelayTimer;
     bool m_databaseOpenInProgress;
-    QHash<QString, Database::RemoteFileConfig> m_pendingRemoteConfigs;
+#ifdef WITH_XC_WEBDAV
+    QHash<QString, Database::RemoteFileConfig> m_webDavCredentials;
+#endif
 };
 
 #endif // KEEPASSX_DATABASETABWIDGET_H

@@ -84,6 +84,8 @@ public:
         QString username;
         QString password;
         int timeoutMsec = 30000;
+        bool useAuthentication = false;
+        bool rememberCredentials = false;
     };
 
     Database();

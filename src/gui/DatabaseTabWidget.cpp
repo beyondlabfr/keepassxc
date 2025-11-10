@@ -20,8 +20,10 @@
 #include <QFileInfo>
 #include <QTabBar>
 #include <QUrl>
+#include <QVariantHash>
 
 #include "autotype/AutoType.h"
+#include "core/Config.h"
 #include "core/Merger.h"
 #include "core/Tools.h"
 #include "format/CsvExporter.h"
@@ -91,6 +93,10 @@ DatabaseTabWidget::DatabaseTabWidget(QWidget* parent)
 
     m_lockDelayTimer.setSingleShot(true);
     connect(&m_lockDelayTimer, &QTimer::timeout, this, [this] { lockDatabases(); });
+
+#ifdef WITH_XC_WEBDAV
+    loadWebDavCredentials();
+#endif
 }
 
 DatabaseTabWidget::~DatabaseTabWidget() = default;
@@ -169,6 +175,9 @@ void DatabaseTabWidget::openWebDavDatabase()
 {
 #ifdef WITH_XC_WEBDAV
     WebDavOpenDialog dialog(this);
+    Database::RemoteFileConfig initial;
+    initial.type = Database::RemoteFileConfig::Type::WebDav;
+    dialog.setInitialConfig(initial);
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
@@ -176,9 +185,16 @@ void DatabaseTabWidget::openWebDavDatabase()
     if (!remoteConfig.url.isValid()) {
         return;
     }
-    const QString normalized = normalizeRemotePath(remoteConfig.url);
-    m_pendingRemoteConfigs.insert(normalized, remoteConfig);
-    addDatabaseTab(normalized);
+    remoteConfig.url = QUrl(normalizeRemotePath(remoteConfig.url));
+    const QString normalized = remoteConfig.url.toString(QUrl::FullyEncoded);
+
+    if (remoteConfig.rememberCredentials && remoteConfig.useAuthentication) {
+        rememberWebDavConfig(remoteConfig);
+    } else {
+        forgetWebDavConfig(normalized);
+    }
+
+    addDatabaseTab(remoteConfig);
 #else
     emit messageGlobal(tr("WebDAV support is not available in this build."), MessageWidget::Error);
 #endif
@@ -203,21 +219,40 @@ void DatabaseTabWidget::addDatabaseTab(const QString& filePath,
     QUrl remoteUrl(filePath);
     if (remoteUrl.isValid() && isRemoteWebDavScheme(remoteUrl.scheme())) {
         const QString normalized = normalizeRemotePath(remoteUrl);
-        Database::RemoteFileConfig remoteConfig;
-        if (m_pendingRemoteConfigs.contains(normalized)) {
-            remoteConfig = m_pendingRemoteConfigs.take(normalized);
-        } else {
-            WebDavOpenDialog dialog(this);
-            dialog.setInitialUrl(remoteUrl);
-            if (dialog.exec() != QDialog::Accepted) {
-                return;
-            }
-            remoteConfig = dialog.remoteConfig();
+        Database::RemoteFileConfig remoteConfig = storedWebDavConfig(normalized);
+
+        if (remoteConfig.rememberCredentials && remoteConfig.useAuthentication) {
+            remoteConfig.url = QUrl(normalized);
+            addDatabaseTab(remoteConfig, inBackground, password, keyfile);
+            return;
         }
+
+        WebDavOpenDialog dialog(this);
+        Database::RemoteFileConfig dialogConfig;
+        dialogConfig.type = Database::RemoteFileConfig::Type::WebDav;
+        dialogConfig.url = QUrl(normalized);
+        if (remoteConfig.type == Database::RemoteFileConfig::Type::WebDav) {
+            dialogConfig = remoteConfig;
+            dialogConfig.url = QUrl(normalized);
+        }
+        dialog.setInitialConfig(dialogConfig);
+        if (dialog.exec() != QDialog::Accepted) {
+            return;
+        }
+        remoteConfig = dialog.remoteConfig();
         if (!remoteConfig.url.isValid()) {
-            remoteConfig.url = remoteUrl;
+            remoteConfig.url = QUrl(normalized);
+        } else {
+            remoteConfig.url = QUrl(normalizeRemotePath(remoteConfig.url));
         }
-        remoteConfig.url = QUrl(normalizeRemotePath(remoteConfig.url));
+        remoteConfig.type = Database::RemoteFileConfig::Type::WebDav;
+
+        if (remoteConfig.rememberCredentials && remoteConfig.useAuthentication) {
+            rememberWebDavConfig(remoteConfig);
+        } else {
+            forgetWebDavConfig(normalized);
+        }
+
         addDatabaseTab(remoteConfig, inBackground, password, keyfile);
         return;
     }
@@ -264,6 +299,10 @@ void DatabaseTabWidget::addDatabaseTab(const Database::RemoteFileConfig& remoteC
     }
 
     const QString normalized = normalizeRemotePath(remoteConfig.url);
+
+    if (remoteConfig.rememberCredentials && remoteConfig.useAuthentication) {
+        rememberWebDavConfig(remoteConfig);
+    }
 
     for (int i = 0, c = count(); i < c; ++i) {
         auto* existingWidget = databaseWidgetFromIndex(i);
@@ -371,6 +410,106 @@ void DatabaseTabWidget::addDatabaseTab(DatabaseWidget* dbWidget, bool inBackgrou
             this,
             &DatabaseTabWidget::unlockDatabaseInDialogForSync);
 }
+
+#ifdef WITH_XC_WEBDAV
+void DatabaseTabWidget::loadWebDavCredentials()
+{
+    m_webDavCredentials.clear();
+
+    const QVariantHash stored = config()->get(Config::LastWebDavCredentials).toHash();
+    for (auto it = stored.constBegin(); it != stored.constEnd(); ++it) {
+        const QString normalized = it.key();
+        const QVariantHash entry = it.value().toHash();
+
+        Database::RemoteFileConfig config;
+        config.type = Database::RemoteFileConfig::Type::WebDav;
+        config.url = QUrl(normalized);
+        config.useAuthentication = entry.value(QStringLiteral("useAuthentication"), true).toBool();
+        config.username = entry.value(QStringLiteral("username")).toString();
+        config.password = entry.value(QStringLiteral("password")).toString();
+        config.timeoutMsec = entry.value(QStringLiteral("timeout"), 30000).toInt();
+        config.rememberCredentials = entry.value(QStringLiteral("remember"), true).toBool();
+
+        if (!config.url.isValid()) {
+            config.url = QUrl(normalized);
+        }
+
+        if (!config.rememberCredentials || !config.useAuthentication) {
+            continue;
+        }
+
+        m_webDavCredentials.insert(normalized, config);
+    }
+}
+
+void DatabaseTabWidget::persistWebDavCredentials() const
+{
+    QVariantHash stored;
+    for (auto it = m_webDavCredentials.constBegin(); it != m_webDavCredentials.constEnd(); ++it) {
+        const auto& config = it.value();
+        if (!config.rememberCredentials || !config.useAuthentication) {
+            continue;
+        }
+
+        QVariantHash entry;
+        entry.insert(QStringLiteral("useAuthentication"), config.useAuthentication);
+        entry.insert(QStringLiteral("username"), config.username);
+        entry.insert(QStringLiteral("password"), config.password);
+        entry.insert(QStringLiteral("timeout"), config.timeoutMsec);
+        entry.insert(QStringLiteral("remember"), config.rememberCredentials);
+
+        stored.insert(it.key(), entry);
+    }
+
+    if (stored.isEmpty()) {
+        config()->remove(Config::LastWebDavCredentials);
+    } else {
+        config()->set(Config::LastWebDavCredentials, stored);
+    }
+}
+
+Database::RemoteFileConfig DatabaseTabWidget::storedWebDavConfig(const QString& normalizedPath) const
+{
+    auto it = m_webDavCredentials.constFind(normalizedPath);
+    if (it != m_webDavCredentials.constEnd()) {
+        return it.value();
+    }
+
+    Database::RemoteFileConfig config;
+    config.type = Database::RemoteFileConfig::Type::WebDav;
+    config.url = QUrl(normalizedPath);
+    if (config.timeoutMsec <= 0) {
+        config.timeoutMsec = 30000;
+    }
+    return config;
+}
+
+void DatabaseTabWidget::rememberWebDavConfig(const Database::RemoteFileConfig& config)
+{
+    if (config.type != Database::RemoteFileConfig::Type::WebDav || !config.url.isValid()
+        || !config.rememberCredentials || !config.useAuthentication) {
+        return;
+    }
+
+    const QString key = normalizeRemotePath(config.url);
+    Database::RemoteFileConfig stored = config;
+    stored.url = QUrl(key);
+    stored.rememberCredentials = true;
+    if (stored.timeoutMsec <= 0) {
+        stored.timeoutMsec = 30000;
+    }
+
+    m_webDavCredentials.insert(key, stored);
+    persistWebDavCredentials();
+}
+
+void DatabaseTabWidget::forgetWebDavConfig(const QString& normalizedPath)
+{
+    if (m_webDavCredentials.remove(normalizedPath) > 0) {
+        persistWebDavCredentials();
+    }
+}
+#endif
 
 void DatabaseTabWidget::importFile()
 {
