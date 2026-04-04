@@ -60,8 +60,17 @@ option(WITH_XC_KEESHARE "Sharing integration with KeeShare" OFF)
 option(WITH_XC_UPDATECHECK "Include automatic update checks; disable for controlled distributions" ON)
 if(UNIX AND NOT APPLE)
     option(WITH_XC_FDOSECRETS "Implement freedesktop.org Secret Storage Spec server side API." OFF)
+    set(WITH_XC_X11 ON CACHE BOOL "Enable building with X11 deps")
 endif()
 option(WITH_XC_DOCS "Enable building of documentation" ON)
+if(WIN32 OR APPLE)
+    set(WITH_XC_CODESIGN_IDENTITY "" CACHE STRING "Certificate to be used for signing binaries before packaging.")
+    if(WIN32)
+        set(WITH_XC_CODESIGN_TIMESTAMP_URL "http://timestamp.sectigo.com" CACHE STRING "Timestamp URL for Windows code signing.")
+    elseif(APPLE)
+        set(WITH_XC_NOTARY_KEYCHAIN_PROFILE "" CACHE STRING "Keychain profile name for stored Apple notarization credentials.")
+    endif()
+endif()
 
 option(WITH_XC_WEBDAV "Enable WebDAV remote database support." ON)
 if(WITH_XC_WEBDAV)
@@ -70,8 +79,6 @@ if(WITH_XC_WEBDAV)
         message(STATUS "Enabling WITH_XC_NETWORKING because WITH_XC_WEBDAV is enabled")
     endif()
 endif()
-
-set(WITH_XC_X11 ON CACHE BOOL "Enable building with X11 deps")
 
 if(APPLE)
     # Perform the platform checks before applying the stricter compiler flags.
@@ -230,17 +237,23 @@ if("${CMAKE_SIZEOF_VOID_P}" EQUAL "4")
     set(IS_32BIT TRUE)
 endif()
 
-set(CLANG_COMPILER_ID_REGEX "^(Apple)?[Cc]lang$")
-if("${CMAKE_C_COMPILER}" MATCHES "clang$"
-        OR "${CMAKE_EXTRA_GENERATOR_C_SYSTEM_DEFINED_MACROS}" MATCHES "__clang__"
-        OR "${CMAKE_C_COMPILER_ID}" MATCHES ${CLANG_COMPILER_ID_REGEX})
-    set(CMAKE_COMPILER_IS_CLANG 1)
-endif()
+if("${CMAKE_CXX_COMPILER}" MATCHES "clang-cl(.exe)?$")
+    # clang-cl uses MSVC compiler flags
+    set(MSVC 1)
+    set(CMAKE_COMPILER_IS_CLANG_MSVC 1)
+else()
+    set(CLANG_COMPILER_ID_REGEX "^(Apple)?[Cc]lang$")
+    if("${CMAKE_C_COMPILER}" MATCHES "clang$"
+            OR "${CMAKE_EXTRA_GENERATOR_C_SYSTEM_DEFINED_MACROS}" MATCHES "__clang__"
+            OR "${CMAKE_C_COMPILER_ID}" MATCHES ${CLANG_COMPILER_ID_REGEX})
+        set(CMAKE_COMPILER_IS_CLANG 1)
+    endif()
 
-if("${CMAKE_CXX_COMPILER}" MATCHES "clang(\\+\\+)?$"
-        OR "${CMAKE_EXTRA_GENERATOR_CXX_SYSTEM_DEFINED_MACROS}" MATCHES "__clang__"
-        OR "${CMAKE_CXX_COMPILER_ID}" MATCHES ${CLANG_COMPILER_ID_REGEX})
-    set(CMAKE_COMPILER_IS_CLANGXX 1)
+    if("${CMAKE_CXX_COMPILER}" MATCHES "clang(\\+\\+)?$"
+            OR "${CMAKE_EXTRA_GENERATOR_CXX_SYSTEM_DEFINED_MACROS}" MATCHES "__clang__"
+            OR "${CMAKE_CXX_COMPILER_ID}" MATCHES ${CLANG_COMPILER_ID_REGEX})
+        set(CMAKE_COMPILER_IS_CLANGXX 1)
+    endif()
 endif()
 
 macro(add_gcc_compiler_cxxflags FLAGS)
@@ -403,11 +416,15 @@ if (MSVC)
     if(MSVC_TOOLSET_VERSION LESS 141)
         message(FATAL_ERROR "Only Microsoft Visual Studio 17 and newer are supported!")
     endif()
-    add_compile_options(/permissive- /utf-8 /MP)
-    if(IS_DEBUG_BUILD)
-        add_compile_options(/Zf)
-        if(MSVC_TOOLSET_VERSION GREATER 141)
-            add_compile_definitions(/fsanitize=address)
+    add_compile_options(/permissive- /utf-8)
+    # Clang-cl does not support /MP, /Zf, or /fsanitize=address
+    if (NOT CMAKE_COMPILER_IS_CLANG_MSVC)
+        add_compile_options(/MP)
+        if(IS_DEBUG_BUILD)
+            add_compile_options(/Zf)
+            if(MSVC_TOOLSET_VERSION GREATER 141)
+                add_compile_definitions(/fsanitize=address)
+            endif()
         endif()
     endif()
 endif()
@@ -423,7 +440,7 @@ if(WIN32)
             # By default MSVC enables NXCOMPAT
             add_compile_options(/guard:cf)
             add_link_options(/DYNAMICBASE /HIGHENTROPYVA /GUARD:CF)
-        else(MINGW)
+        else()
             set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--nxcompat -Wl,--dynamicbase")
             set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,--nxcompat -Wl,--dynamicbase")
             # Enable high entropy ASLR for 64-bit builds
@@ -433,6 +450,8 @@ if(WIN32)
             endif()
         endif()
     endif()
+    # Determine if we can link against the Windows SDK, used for Windows Hello support
+    find_library(WINSDK WindowsApp.lib)
 endif()
 
 if(APPLE AND WITH_APP_BUNDLE OR WIN32)

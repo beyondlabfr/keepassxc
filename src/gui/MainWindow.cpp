@@ -210,9 +210,6 @@ MainWindow::MainWindow()
         databaseLockButton->setPopupMode(QToolButton::MenuButtonPopup);
     }
 
-    restoreGeometry(config()->get(Config::GUI_MainWindowGeometry).toByteArray());
-    restoreState(config()->get(Config::GUI_MainWindowState).toByteArray());
-
     connect(m_ui->tabWidget, &DatabaseTabWidget::databaseLocked, this, &MainWindow::databaseLocked);
     connect(m_ui->tabWidget, &DatabaseTabWidget::databaseUnlocked, this, &MainWindow::databaseUnlocked);
     connect(m_ui->tabWidget, &DatabaseTabWidget::activeDatabaseChanged, this, &MainWindow::activeDatabaseChanged);
@@ -663,12 +660,13 @@ MainWindow::MainWindow()
     auto* hidePreRelWarn = new QAction(tr("Don't show again for this version"), m_ui->globalMessageWidget);
     m_ui->globalMessageWidget->addAction(hidePreRelWarn);
     auto hidePreRelWarnConn = QSharedPointer<QMetaObject::Connection>::create();
-    *hidePreRelWarnConn = connect(m_ui->globalMessageWidget, &KMessageWidget::hideAnimationFinished, [=] {
-        m_ui->globalMessageWidget->removeAction(hidePreRelWarn);
-        disconnect(*hidePreRelWarnConn);
-        hidePreRelWarn->deleteLater();
-    });
-    connect(hidePreRelWarn, &QAction::triggered, [=] {
+    *hidePreRelWarnConn = connect(
+        m_ui->globalMessageWidget, &KMessageWidget::hideAnimationFinished, [this, hidePreRelWarn, hidePreRelWarnConn] {
+            m_ui->globalMessageWidget->removeAction(hidePreRelWarn);
+            disconnect(*hidePreRelWarnConn);
+            hidePreRelWarn->deleteLater();
+        });
+    connect(hidePreRelWarn, &QAction::triggered, [this] {
         m_ui->globalMessageWidget->animatedHide();
         config()->set(Config::Messages_HidePreReleaseWarning, KEEPASSXC_VERSION);
     });
@@ -1413,6 +1411,12 @@ void MainWindow::showEvent(QShowEvent* event)
     // Qt Hack - Prevent white flicker when showing window
     QTimer::singleShot(50, this, [=] { setProperty("windowOpacity", 1.0); });
 #endif
+
+    // Restore geometry and window state only on the first showEvent to prevent issues with minimized tray startup
+    if (!m_windowInformationRestored) {
+        restoreWindowInformation();
+        m_windowInformationRestored = true;
+    }
 }
 
 void MainWindow::hideEvent(QHideEvent* event)
@@ -1568,6 +1572,12 @@ void MainWindow::saveWindowInformation()
         config()->set(Config::GUI_MainWindowGeometry, saveGeometry());
         config()->set(Config::GUI_MainWindowState, saveState());
     }
+}
+
+void MainWindow::restoreWindowInformation()
+{
+    restoreGeometry(config()->get(Config::GUI_MainWindowGeometry).toByteArray());
+    restoreState(config()->get(Config::GUI_MainWindowState).toByteArray());
 }
 
 bool MainWindow::saveLastDatabases()
@@ -1734,9 +1744,11 @@ void MainWindow::applySettingsChanges()
     m_ui->actionShowToolbar->setChecked(!hideToolbar);
     m_ui->actionShowMenubar->setChecked(!hideMenubar);
 
+#ifndef Q_OS_MACOS
     // When menubar is hidden with setHidden() the menu keyboard shortcuts are disabled on Wayland,
     // so force height of 0 instead and use maximumHeight() > 0 instead of isVisible() elsewhere
     m_ui->menubar->setMaximumHeight(hideMenubar ? 0 : QWIDGETSIZE_MAX);
+#endif
 
     m_ui->toolBar->setHidden(config()->get(Config::GUI_HideToolbar).toBool());
     auto movable = config()->get(Config::GUI_MovableToolbar).toBool();
@@ -2060,7 +2072,6 @@ void MainWindow::initViewMenu()
             restartApp(tr("You must restart the application to apply this setting. Would you like to restart now?"));
         } else {
             kpxcApp->applyTheme();
-            kpxcApp->applyFontSize();
         }
     });
 
@@ -2302,6 +2313,10 @@ bool MainWindowEventFilter::eventFilter(QObject* watched, QEvent* event)
         }
 #endif
     } else if (eventType == QEvent::KeyRelease && watched == mainWindow) {
+#ifdef Q_OS_MACOS
+        // On macOS, the menubar is always visible, so no need to toggle it
+        return false;
+#endif
         auto keyEvent = dynamic_cast<QKeyEvent*>(event);
 #ifdef Q_OS_WIN
         // Windows translates AltGr into CTRL + ALT, this breaks using AltGr when the menubar is hidden

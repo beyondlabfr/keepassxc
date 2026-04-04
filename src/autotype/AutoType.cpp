@@ -32,6 +32,7 @@
 #include "core/Global.h"
 #include "core/Resources.h"
 #include "core/Tools.h"
+#include "core/Totp.h"
 #include "gui/MainWindow.h"
 #include "gui/MessageBox.h"
 #include "gui/osutils/OSUtils.h"
@@ -114,6 +115,8 @@ namespace
                                                         {"f14", Qt::Key_F14},
                                                         {"f15", Qt::Key_F15},
                                                         {"f16", Qt::Key_F16}};
+    constexpr int s_minWaitDelay = 100; // 100 ms
+    constexpr int s_maxWaitDelay = 10000; // 10 seconds
 } // namespace
 
 AutoType* AutoType::m_instance = nullptr;
@@ -311,8 +314,8 @@ void AutoType::executeAutoTypeActions(const Entry* entry,
     // Restore executor mode
     m_executor->mode = mode;
 
-    int delay = qMax(100, config()->get(Config::AutoTypeStartDelay).toInt());
-    Tools::wait(delay);
+    // Initial Auto-Type delay to allow window to come to foreground
+    Tools::wait(qBound(s_minWaitDelay, config()->get(Config::AutoTypeStartDelay).toInt(), s_maxWaitDelay));
 
     // Grab the current active window after everything settles
     if (window == 0) {
@@ -345,7 +348,8 @@ void AutoType::executeAutoTypeActions(const Entry* entry,
                 break;
             }
 
-            Tools::wait(delay);
+            // Retry wait delay
+            Tools::wait(100);
         }
 
         // Last action failed to complete, cancel the rest of the sequence
@@ -544,12 +548,16 @@ AutoType::parseSequence(const QString& entrySequence, const Entry* entry, QStrin
     }
 
     const int maxTypeDelay = 500;
-    const int maxWaitDelay = 10000;
     const int maxRepetition = 100;
 
+    int currentTypingDelay = qBound(0, config()->get(Config::AutoTypeDelay).toInt(), maxTypeDelay);
+    // Take into account the initial delay which is added before any actions are performed
+    int cumulativeDelay = qBound(s_minWaitDelay, config()->get(Config::AutoTypeStartDelay).toInt(), s_maxWaitDelay);
+
+    // Initial actions include start delay and initial inter-key delay
     QList<QSharedPointer<AutoTypeAction>> actions;
     actions << QSharedPointer<AutoTypeBegin>::create();
-    actions << QSharedPointer<AutoTypeDelay>::create(qMax(0, config()->get(Config::AutoTypeDelay).toInt()), true);
+    actions << QSharedPointer<AutoTypeDelay>::create(currentTypingDelay, true);
 
     // Replace escaped braces with a template for easier regex
     QString sequence = entrySequence;
@@ -565,7 +573,7 @@ AutoType::parseSequence(const QString& entrySequence, const Entry* entry, QStrin
     // Group 1 = modifier key (opt)
     // Group 2 = full placeholder
     // Group 3 = inner placeholder (allows nested placeholders)
-    // Group 4 = repeat (opt)
+    // Group 4 = repeat / delay time (opt)
     // Group 5 = character
     QRegularExpression regex("([+%^#]*)(?:({((?>[^{}]+?|(?2))+?)(?:\\s+(\\d+))?})|(.))");
     auto results = regex.globalMatch(sequence);
@@ -627,19 +635,23 @@ AutoType::parseSequence(const QString& entrySequence, const Entry* entry, QStrin
             }
             actions << QSharedPointer<AutoTypeDelay>::create(qBound(0, delay, maxTypeDelay), true);
         } else if (placeholder == "delay") {
-            // Mid typing delay (wait)
-            if (repeat > maxWaitDelay) {
-                error = tr("Very long delay detected, max is %1: %2").arg(maxWaitDelay).arg(fullPlaceholder);
+            // Mid typing delay (wait), repeat represents the desired delay in milliseconds
+            if (repeat > s_maxWaitDelay) {
+                error = tr("Very long delay detected, max is %1: %2").arg(s_maxWaitDelay).arg(fullPlaceholder);
                 return {};
             }
-            actions << QSharedPointer<AutoTypeDelay>::create(qBound(0, repeat, maxWaitDelay));
+            cumulativeDelay += repeat;
+            actions << QSharedPointer<AutoTypeDelay>::create(qBound(0, repeat, s_maxWaitDelay));
         } else if (placeholder == "clearfield") {
             // Platform-specific field clearing
             actions << QSharedPointer<AutoTypeClearField>::create();
-        } else if (placeholder == "totp") {
+        } else if (placeholder == "totp" || placeholder == "timeotp") {
             if (entry->hasValidTotp()) {
-                // Entry totp (requires special handling)
-                QString totp = entry->totp();
+                // Calculate TOTP at the time of typing including delays
+                bool isValid = false;
+                auto time =
+                    Clock::currentSecondsSinceEpoch() + (cumulativeDelay + currentTypingDelay * actions.count()) / 1000;
+                auto totp = Totp::generateTotp(entry->totpSettings(), &isValid, time);
                 for (const auto& ch : totp) {
                     actions << QSharedPointer<AutoTypeKey>::create(ch);
                 }

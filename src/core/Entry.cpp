@@ -1138,6 +1138,15 @@ QString Entry::resolveMultiplePlaceholdersRecursive(const QString& str, int maxD
         return str;
     }
 
+    // Short circuit if we have escaped the placeholder brackets
+    if (str.startsWith("\\{") && str.endsWith("\\}")) {
+        // Replace the escaped brackets with actuals and move on
+        auto ret = str;
+        ret.replace(0, 2, "{");
+        ret.replace(ret.size() - 2, 2, "}");
+        return ret;
+    }
+
     QString result;
     auto matches = placeholderRegEx.globalMatch(str);
     int capEnd = 0;
@@ -1585,6 +1594,7 @@ Entry::PlaceholderType Entry::placeholderType(const QString& placeholder) const
         {QStringLiteral("{PASSWORD}"), PlaceholderType::Password},
         {QStringLiteral("{NOTES}"), PlaceholderType::Notes},
         {QStringLiteral("{TOTP}"), PlaceholderType::Totp},
+        {QStringLiteral("{TIMEOTP}"), PlaceholderType::Totp},
         {QStringLiteral("{URL}"), PlaceholderType::Url},
         {QStringLiteral("{UUID}"), PlaceholderType::Uuid},
         {QStringLiteral("{URL:RMVSCM}"), PlaceholderType::UrlWithoutScheme},

@@ -52,6 +52,7 @@ private slots:
     void testAutoTypeSyntaxChecks();
     void testAutoTypeEffectiveSequences();
     void testAutoTypeEmptyWindowAssociation();
+    void testAutoTypeTotp();
 
 private:
     AutoTypePlatformInterface* m_platform;

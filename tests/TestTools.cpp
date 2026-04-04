@@ -19,6 +19,7 @@
 
 #include "core/Clock.h"
 #include "core/Tools.h"
+#include "mock/MockClock.h"
 
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -33,7 +34,22 @@ namespace
     {
         return wholes + QLocale().decimalPoint() + fractions + " " + unit;
     }
+
+    MockClock* s_clock = nullptr;
 } // namespace
+
+void TestTools::initTestCase()
+{
+    Q_ASSERT(s_clock == nullptr);
+    s_clock = new MockClock(2026, 3, 8, 21, 45, 05);
+    MockClock::setup(s_clock);
+}
+
+void TestTools::cleanupTestCase()
+{
+    MockClock::teardown();
+    s_clock = nullptr;
+}
 
 void TestTools::testHumanReadableFileSize()
 {
@@ -403,8 +419,8 @@ void TestTools::testGetMimeTypeByFileInfo()
 
     const QStringList Markdowns = {"test.md", "test.markdown"};
 
-    for (const auto& makdown : Markdowns) {
-        QCOMPARE(Tools::getMimeType(QFileInfo(makdown)), Tools::MimeType::Markdown);
+    for (const auto& markdown : Markdowns) {
+        QCOMPARE(Tools::getMimeType(QFileInfo(markdown)), Tools::MimeType::Markdown);
     }
 
     const QStringList UnknownHeaders = {"test.doc", "test.pdf", "test.docx"};
