@@ -179,6 +179,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Ninja doit être dans le PATH avant CMake (-G Ninja). vcpkg / ports peuvent aussi en avoir besoin.
+      - name: Install Ninja
+        run: brew install ninja
+
       - name: Clone vcpkg
         run: |
           git clone https://github.com/microsoft/vcpkg.git "$VCPKG_UPSTREAM_ROOT"
@@ -209,6 +213,12 @@ jobs:
         env:
           MAC_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY_NAME }}
         run: |
+          set -x
+          command -v ninja
+          ninja --version
+          command -v cmake
+          cmake --version
+          clang --version || true
           EXTRA=""
           if [ "${{ inputs.sign_macos }}" = "true" ] && [ "${{ needs.validate-signing.outputs.mac_sign }}" = "true" ]; then
             EXTRA="-DWITH_XC_CODESIGN_IDENTITY=$MAC_IDENTITY -DWITH_XC_NOTARY_KEYCHAIN_PROFILE=kpxc-gh-notary"
@@ -223,6 +233,16 @@ jobs:
             -DKEEPASSXC_BUILD_TYPE=Release \
             "-DGIT_HEAD_OVERRIDE=${GITHUB_SHA:0:7}" \
             $EXTRA
+
+      - name: Show vcpkg log on configure failure
+        if: failure()
+        run: |
+          if [ -f build/vcpkg-manifest-install.log ]; then
+            echo "---- tail build/vcpkg-manifest-install.log ----"
+            tail -300 build/vcpkg-manifest-install.log
+          else
+            echo "Pas de build/vcpkg-manifest-install.log (configure avant vcpkg ?)"
+          fi
 
       - name: Build
         run: cmake --build build --parallel
@@ -254,7 +274,7 @@ jobs:
             build-essential cmake ninja-build pkg-config \
             dpkg-dev \
             libbotan-2-dev libargon2-dev libminizip-dev zlib1g-dev \
-            libqrencode-dev libreadline-dev \
+            libqrencode-dev libreadline-dev libkeyutils-dev \
             qtbase5-dev qttools5-dev qttools5-dev-tools libqt5svg5-dev \
             libqt5x11extras5-dev libxi-dev libxtst-dev libssl-dev \
             libpcsclite-dev libusb-1.0-0-dev
