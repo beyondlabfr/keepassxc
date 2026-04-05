@@ -46,6 +46,8 @@ on:
 
 env:
   VCPKG_COMMIT: 66c0373dc7fca549e5803087b9487edfe3aca0a1
+  # Le dépôt contient déjà un dossier « vcpkg/ » (triplets locaux) — ne pas y cloner microsoft/vcpkg.
+  VCPKG_UPSTREAM_ROOT: ${{ github.workspace }}/vcpkg-upstream
 
 jobs:
   validate-signing:
@@ -112,8 +114,8 @@ jobs:
 
       - name: Bootstrap vcpkg
         run: |
-          git clone https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg"
-          cd "${{ github.workspace }}/vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_UPSTREAM_ROOT }}"
+          cd "${{ env.VCPKG_UPSTREAM_ROOT }}"
           git checkout ${{ env.VCPKG_COMMIT }}
           .\bootstrap-vcpkg.bat
 
@@ -145,7 +147,7 @@ jobs:
           }
           cmake -B build -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_UPSTREAM_ROOT }}/scripts/buildsystems/vcpkg.cmake" `
             -DWITH_TESTS=OFF `
             -DWITH_GUI_TESTS=OFF `
             -DWITH_XC_DOCS=OFF `
@@ -179,8 +181,8 @@ jobs:
 
       - name: Clone vcpkg
         run: |
-          git clone https://github.com/microsoft/vcpkg.git "$GITHUB_WORKSPACE/vcpkg"
-          cd "$GITHUB_WORKSPACE/vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git "$VCPKG_UPSTREAM_ROOT"
+          cd "$VCPKG_UPSTREAM_ROOT"
           git checkout ${{ env.VCPKG_COMMIT }}
           ./bootstrap-vcpkg.sh
 
@@ -213,7 +215,7 @@ jobs:
           fi
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_UPSTREAM_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DWITH_TESTS=OFF \
             -DWITH_GUI_TESTS=OFF \
             -DWITH_XC_DOCS=OFF \
