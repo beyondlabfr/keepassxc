@@ -21,6 +21,10 @@
 #include "DatabaseTabWidget.h"
 #include "DatabaseWidget.h"
 
+#ifdef WITH_XC_WEBDAV
+#include "core/remote/WebDavClient.h"
+#endif
+
 #include <QFileInfo>
 #include <QLayout>
 #include <QShortcut>
@@ -160,7 +164,26 @@ void DatabaseOpenDialog::setTarget(DatabaseWidget* dbWidget, const QString& file
     connect(this, &DatabaseOpenDialog::dialogFinished, dbWidget, &DatabaseWidget::unlockDatabase);
 
     m_currentDbWidget = dbWidget;
-    m_view->load(filePath);
+
+    Database::RemoteFileConfig remote = dbWidget->database()->remoteFileConfig();
+#ifdef WITH_XC_WEBDAV
+    if (dbWidget->database()->hasRemoteFile()) {
+        auto* tabs = qobject_cast<DatabaseTabWidget*>(parent());
+        if (!tabs) {
+            for (QWidget* p = dbWidget->parentWidget(); p; p = p->parentWidget()) {
+                tabs = qobject_cast<DatabaseTabWidget*>(p);
+                if (tabs) {
+                    break;
+                }
+            }
+        }
+        if (tabs) {
+            const QString normalized = WebDavClient::normalizePath(QUrl(filePath));
+            remote = tabs->mergeStoredWebDavCredentials(normalized, remote);
+        }
+    }
+#endif
+    m_view->load(filePath, remote);
 }
 
 void DatabaseOpenDialog::setIntent(DatabaseOpenDialog::Intent intent)

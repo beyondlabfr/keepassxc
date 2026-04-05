@@ -302,6 +302,9 @@ private:
     void openDatabaseFromEntry(const Entry* entry, bool inBackground = true);
     void performIconDownloads(const QList<Entry*>& entries, bool force = false, bool downloadInBackground = false);
     bool performSave(QString& errorMessage, const QString& fileName = {});
+#ifdef WITH_XC_WEBDAV
+    Database::RemoteFileConfig resolveWebDavCredentials(const QString& filePath) const;
+#endif
 
     QSharedPointer<Database> m_db;
 

@@ -89,6 +89,8 @@ private slots:
     void hardwareKeyResponse(bool found);
 
 private:
+    void ensureWebDavCredentials();
+
 #ifdef WITH_XC_YUBIKEY
     QPointer<DeviceListener> m_deviceListener;
 #endif

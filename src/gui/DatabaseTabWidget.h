@@ -71,6 +71,11 @@ public slots:
     DatabaseWidget* newDatabase();
     void openDatabase();
     void openWebDavDatabase();
+#ifdef WITH_XC_WEBDAV
+    /** Merge in-memory WebDAV config with persisted credentials when the database copy lacks them (e.g. after lock). */
+    Database::RemoteFileConfig mergeStoredWebDavCredentials(const QString& normalizedWebDavPath,
+                                                            const Database::RemoteFileConfig& current) const;
+#endif
     void mergeDatabase();
     void importFile();
     bool saveDatabase(int index = -1);

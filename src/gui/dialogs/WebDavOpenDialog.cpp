@@ -8,23 +8,7 @@
 #include <QSpinBox>
 #include <QUrl>
 
-namespace
-{
-    bool isSupportedScheme(const QString& scheme)
-    {
-        return scheme.compare(QStringLiteral("http"), Qt::CaseInsensitive) == 0
-               || scheme.compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0
-               || scheme.compare(QStringLiteral("webdav"), Qt::CaseInsensitive) == 0
-               || scheme.compare(QStringLiteral("webdavs"), Qt::CaseInsensitive) == 0;
-    }
-
-    QUrl sanitizeUrl(const QUrl& url)
-    {
-        QUrl copy(url);
-        copy.setUserInfo(QString());
-        return copy;
-    }
-} // namespace
+#include "core/remote/WebDavClient.h"
 
 WebDavOpenDialog::WebDavOpenDialog(QWidget* parent)
     : QDialog(parent)
@@ -92,7 +76,7 @@ void WebDavOpenDialog::accept()
 void WebDavOpenDialog::updateAcceptState()
 {
     const QUrl url(m_ui->urlLineEdit->text().trimmed());
-    bool valid = url.isValid() && (isSupportedScheme(url.scheme()) || url.scheme().isEmpty());
+    bool valid = url.isValid() && (WebDavClient::isWebDavScheme(url.scheme()) || url.scheme().isEmpty());
     if (valid && m_ui->useAuthCheckBox->isChecked()) {
         valid = !m_ui->usernameLineEdit->text().trimmed().isEmpty();
     }
@@ -113,12 +97,12 @@ bool WebDavOpenDialog::updateRemoteConfig()
         url.setScheme(QStringLiteral("https"));
     }
 
-    if (!isSupportedScheme(url.scheme())) {
+    if (!WebDavClient::isWebDavScheme(url.scheme())) {
         return false;
     }
 
     m_remoteConfig.type = Database::RemoteFileConfig::Type::WebDav;
-    m_remoteConfig.url = sanitizeUrl(url);
+    m_remoteConfig.url = WebDavClient::sanitizeUrl(url);
     m_remoteConfig.useAuthentication = m_ui->useAuthCheckBox->isChecked();
     m_remoteConfig.username = m_remoteConfig.useAuthentication ? m_ui->usernameLineEdit->text().trimmed() : QString();
     m_remoteConfig.password = m_remoteConfig.useAuthentication ? m_ui->passwordLineEdit->text() : QString();

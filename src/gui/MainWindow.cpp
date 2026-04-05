@@ -32,22 +32,10 @@
 #include <QWindow>
 #ifdef WITH_XC_WEBDAV
 #include <QUrl>
+#include "core/remote/WebDavClient.h"
 #endif
 
 #include "config-keepassx.h"
-
-#ifdef WITH_XC_WEBDAV
-namespace
-{
-    bool isRemoteWebDavScheme(const QString& scheme)
-    {
-        return scheme.compare(QStringLiteral("http"), Qt::CaseInsensitive) == 0
-               || scheme.compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0
-               || scheme.compare(QStringLiteral("webdav"), Qt::CaseInsensitive) == 0
-               || scheme.compare(QStringLiteral("webdavs"), Qt::CaseInsensitive) == 0;
-    }
-}
-#endif
 
 #include "Application.h"
 #include "Clipboard.h"
@@ -369,6 +357,9 @@ MainWindow::MainWindow()
 
     m_ui->actionDatabaseNew->setIcon(icons()->icon("document-new"));
     m_ui->actionDatabaseOpen->setIcon(icons()->icon("document-open"));
+#ifdef WITH_XC_WEBDAV
+    m_ui->actionDatabaseOpenWebDav->setIcon(icons()->icon("remote-sync"));
+#endif
     m_ui->menuRecentDatabases->setIcon(icons()->icon("document-open-recent"));
     m_ui->actionDatabaseSave->setIcon(icons()->icon("document-save"));
     m_ui->actionDatabaseSaveAs->setIcon(icons()->icon("document-save-as"));
@@ -740,7 +731,7 @@ void MainWindow::restoreConfigState()
             }
 #ifdef WITH_XC_WEBDAV
             const QUrl urlCandidate(filename);
-            if (urlCandidate.isValid() && isRemoteWebDavScheme(urlCandidate.scheme())) {
+            if (urlCandidate.isValid() && WebDavClient::isWebDavScheme(urlCandidate.scheme())) {
                 openDatabase(filename);
                 continue;
             }

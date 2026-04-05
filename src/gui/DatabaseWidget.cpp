@@ -72,6 +72,23 @@
 #include "gui/passkeys/PasskeyImporter.h"
 #endif
 
+#ifdef WITH_XC_WEBDAV
+#include "core/remote/WebDavClient.h"
+#include "gui/DatabaseTabWidget.h"
+#endif
+
+#ifdef WITH_XC_WEBDAV
+static DatabaseTabWidget* findParentTabWidget(const QWidget* widget)
+{
+    for (QWidget* p = widget ? widget->parentWidget() : nullptr; p; p = p->parentWidget()) {
+        if (auto* tabs = qobject_cast<DatabaseTabWidget*>(p)) {
+            return tabs;
+        }
+    }
+    return nullptr;
+}
+#endif
+
 DatabaseWidget::DatabaseWidget(QSharedPointer<Database> db, QWidget* parent)
     : QStackedWidget(parent)
     , m_db(std::move(db))
@@ -1625,6 +1642,40 @@ void DatabaseWidget::switchToDatabaseSettings()
     }
 }
 
+#ifdef WITH_XC_WEBDAV
+Database::RemoteFileConfig DatabaseWidget::resolveWebDavCredentials(const QString& filePath) const
+{
+    Database::RemoteFileConfig remote = m_db->remoteFileConfig();
+    auto* tabs = findParentTabWidget(this);
+    if (WebDavClient::isDebugEnabled()) {
+        WebDavClient::debugLog(
+            QStringLiteral("resolveWebDavCredentials: filePath=%1 parentTabFound=%2 before useAuth=%3 userEmpty=%4 "
+                           "passEmpty=%5")
+                .arg(filePath)
+                .arg(tabs != nullptr)
+                .arg(remote.useAuthentication)
+                .arg(remote.username.isEmpty())
+                .arg(remote.password.isEmpty()));
+    }
+    if (tabs) {
+        const QString normalized = WebDavClient::normalizePath(QUrl(filePath));
+        remote = tabs->mergeStoredWebDavCredentials(normalized, remote);
+        if (WebDavClient::isDebugEnabled()) {
+            WebDavClient::debugLog(
+                QStringLiteral("resolveWebDavCredentials: after merge useAuth=%1 userEmpty=%2 passEmpty=%3 norm=%4")
+                    .arg(remote.useAuthentication)
+                    .arg(remote.username.isEmpty())
+                    .arg(remote.password.isEmpty())
+                    .arg(normalized));
+        }
+    } else if (WebDavClient::isDebugEnabled()) {
+        WebDavClient::debugLog(
+            QStringLiteral("resolveWebDavCredentials: DatabaseTabWidget not found in parent chain"));
+    }
+    return remote;
+}
+#endif
+
 void DatabaseWidget::switchToOpenDatabase()
 {
     if (currentWidget() != m_databaseOpenWidget || m_databaseOpenWidget->filename() != m_db->filePath()) {
@@ -1634,7 +1685,13 @@ void DatabaseWidget::switchToOpenDatabase()
 
 void DatabaseWidget::switchToOpenDatabase(const QString& filePath)
 {
-    m_databaseOpenWidget->load(filePath, m_db->remoteFileConfig());
+    Database::RemoteFileConfig remote = m_db->remoteFileConfig();
+#ifdef WITH_XC_WEBDAV
+    if (m_db->hasRemoteFile()) {
+        remote = resolveWebDavCredentials(filePath);
+    }
+#endif
+    m_databaseOpenWidget->load(filePath, remote);
     setCurrentWidget(m_databaseOpenWidget);
 }
 
@@ -2152,9 +2209,14 @@ bool DatabaseWidget::lock()
 
     auto newDb = QSharedPointer<Database>::create(m_db->filePath());
     if (m_db->hasRemoteFile()) {
+#ifdef WITH_XC_WEBDAV
+        newDb->setRemoteFileConfig(resolveWebDavCredentials(m_db->filePath()));
+#else
         newDb->setRemoteFileConfig(m_db->remoteFileConfig());
+#endif
+    } else {
+        newDb->open(nullptr);
     }
-    newDb->open(nullptr);
     replaceDatabase(newDb);
 
     m_attemptingLock = false;
@@ -2261,7 +2323,11 @@ void DatabaseWidget::reloadDatabaseFile(bool triggeredBySave)
 
     auto db = QSharedPointer<Database>::create(m_db->filePath());
     if (m_db->hasRemoteFile()) {
+#ifdef WITH_XC_WEBDAV
+        db->setRemoteFileConfig(resolveWebDavCredentials(m_db->filePath()));
+#else
         db->setRemoteFileConfig(m_db->remoteFileConfig());
+#endif
     }
     bool openResult = db->open(database()->key());
 

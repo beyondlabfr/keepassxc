@@ -1,0 +1,361 @@
+# Release manuelle multi-plateforme (Windows, macOS, Linux) avec signatures optionnelles.
+# Secrets : voir .github/RELEASE_SIGNING.md
+name: Release (manual, multi-platform, signed)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (OVERRIDE_VERSION), ex. 2.8.0-fork.1"
+        required: true
+        type: string
+      tag_name:
+        description: "Tag GitHub Release (ex. v2.8.0-fork.1). Vide = release-<version> (/, espaces -> _)"
+        required: false
+        type: string
+      draft:
+        description: "Brouillon GitHub Release"
+        required: false
+        type: boolean
+        default: true
+      prerelease:
+        description: "Pré-release sur GitHub"
+        required: false
+        type: boolean
+        default: false
+      signing_strict:
+        description: "Échouer si les secrets de signature demandés sont absents"
+        required: false
+        type: boolean
+        default: false
+      sign_windows:
+        description: "Signer les binaires Windows (Authenticode)"
+        required: false
+        type: boolean
+        default: true
+      sign_macos:
+        description: "Signer + notariser macOS (Developer ID + notarytool)"
+        required: false
+        type: boolean
+        default: true
+      sign_linux_gpg:
+        description: "Signature GPG des archives Linux (.asc)"
+        required: false
+        type: boolean
+        default: true
+
+env:
+  VCPKG_COMMIT: 66c0373dc7fca549e5803087b9487edfe3aca0a1
+
+jobs:
+  validate-signing:
+    name: Validate signing secrets
+    runs-on: ubuntu-latest
+    outputs:
+      win_sign: ${{ steps.chk.outputs.win_sign }}
+      mac_sign: ${{ steps.chk.outputs.mac_sign }}
+      gpg_sign: ${{ steps.chk.outputs.gpg_sign }}
+    steps:
+      - id: chk
+        env:
+          WIN_PFX: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          MAC_P12: ${{ secrets.MACOS_CODESIGN_P12_BASE64 }}
+          GPG_K: ${{ secrets.GPG_RELEASE_PRIVATE_KEY }}
+          GPG_KEY_ID: ${{ secrets.GPG_RELEASE_KEY_ID }}
+          APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_TEAM: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+          APPLE_PW: ${{ secrets.APPLE_NOTARY_APP_SPECIFIC_PASSWORD }}
+          MAC_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY_NAME }}
+        run: |
+          strict="${{ inputs.signing_strict }}"
+          sign_windows="${{ inputs.sign_windows }}"
+          sign_macos="${{ inputs.sign_macos }}"
+          sign_gpg="${{ inputs.sign_linux_gpg }}"
+          win_ok=true; mac_ok=true; gpg_ok=true
+          if [ "$sign_windows" = "true" ]; then
+            [ -z "$WIN_PFX" ] && win_ok=false
+          fi
+          if [ "$sign_macos" = "true" ]; then
+            if [ -z "$MAC_P12" ] || [ -z "$MAC_IDENTITY" ] || [ -z "$APPLE_ID" ] || [ -z "$APPLE_TEAM" ] || [ -z "$APPLE_PW" ]; then
+              mac_ok=false
+            fi
+          fi
+          if [ "$sign_gpg" = "true" ]; then
+            if [ -z "$GPG_K" ] || [ -z "$GPG_KEY_ID" ]; then gpg_ok=false; fi
+          fi
+          echo "win_sign=$win_ok" >> "$GITHUB_OUTPUT"
+          echo "mac_sign=$mac_ok" >> "$GITHUB_OUTPUT"
+          echo "gpg_sign=$gpg_ok" >> "$GITHUB_OUTPUT"
+          if [ "$strict" = "true" ]; then
+            if [ "$sign_windows" = "true" ] && [ "$win_ok" != "true" ]; then
+              echo "::error::signing_strict: secrets Windows manquants (WINDOWS_CODESIGN_PFX_BASE64)"
+              exit 1
+            fi
+            if [ "$sign_macos" = "true" ] && [ "$mac_ok" != "true" ]; then
+              echo "::error::signing_strict: secrets macOS / Apple manquants (voir RELEASE_SIGNING.md)"
+              exit 1
+            fi
+            if [ "$sign_gpg" = "true" ] && [ "$gpg_ok" != "true" ]; then
+              echo "::error::signing_strict: GPG_RELEASE_PRIVATE_KEY ou GPG_RELEASE_KEY_ID manquant"
+              exit 1
+            fi
+          fi
+
+  build-windows:
+    name: Windows (MSVC + vcpkg)
+    needs: validate-signing
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bootstrap vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "${{ github.workspace }}/vcpkg"
+          cd "${{ github.workspace }}/vcpkg"
+          git checkout ${{ env.VCPKG_COMMIT }}
+          .\bootstrap-vcpkg.bat
+
+      - name: Import code signing certificate
+        if: ${{ inputs.sign_windows == true && needs.validate-signing.outputs.win_sign == 'true' }}
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+        run: |
+          $bytes = [Convert]::FromBase64String($env:PFX_BASE64)
+          [IO.File]::WriteAllBytes("$pwd\codesign.pfx", $bytes)
+          $pwdSec = ConvertTo-SecureString $env:PFX_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath "$pwd\codesign.pfx" -CertStoreLocation Cert:\CurrentUser\My -Password $pwdSec
+
+      - name: Configure CMake
+        shell: pwsh
+        env:
+          THUMBPRINT: ${{ secrets.WINDOWS_CODESIGN_SHA1_THUMBPRINT }}
+        run: |
+          $doSign = ("${{ inputs.sign_windows }}" -eq "true") -and ("${{ needs.validate-signing.outputs.win_sign }}" -eq "true")
+          $ident = ""
+          if ($doSign) {
+            if ($env:THUMBPRINT -and $env:THUMBPRINT.Trim() -ne "") {
+              $ident = $env:THUMBPRINT.Trim()
+            } else {
+              $ident = "auto"
+            }
+          }
+          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DWITH_TESTS=OFF `
+            -DWITH_GUI_TESTS=OFF `
+            -DWITH_XC_DOCS=OFF `
+            "-DOVERRIDE_VERSION=${{ inputs.version }}" `
+            -DKEEPASSXC_BUILD_TYPE=Release `
+            "-DGIT_HEAD_OVERRIDE=$($env:GITHUB_SHA.Substring(0,7))" `
+            "-DWITH_XC_CODESIGN_IDENTITY=$ident"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package (ZIP)
+        working-directory: build
+        run: cpack -C Release -G ZIP
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepassxc-windows
+          path: build/KeePassXC-*-Win64.zip
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS (vcpkg + codesign + notarize)
+    needs: validate-signing
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "$GITHUB_WORKSPACE/vcpkg"
+          cd "$GITHUB_WORKSPACE/vcpkg"
+          git checkout ${{ env.VCPKG_COMMIT }}
+          ./bootstrap-vcpkg.sh
+
+      - name: Import Apple code signing certificates
+        if: ${{ inputs.sign_macos == true && needs.validate-signing.outputs.mac_sign == 'true' }}
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CODESIGN_P12_BASE64 }}
+          p12-password: ${{ secrets.MACOS_CODESIGN_P12_PASSWORD }}
+
+      - name: Store notarytool credentials
+        if: ${{ inputs.sign_macos == true && needs.validate-signing.outputs.mac_sign == 'true' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_SPECIFIC_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials "kpxc-gh-notary" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_PASSWORD"
+
+      - name: Configure CMake
+        env:
+          MAC_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY_NAME }}
+        run: |
+          EXTRA=""
+          if [ "${{ inputs.sign_macos }}" = "true" ] && [ "${{ needs.validate-signing.outputs.mac_sign }}" = "true" ]; then
+            EXTRA="-DWITH_XC_CODESIGN_IDENTITY=$MAC_IDENTITY -DWITH_XC_NOTARY_KEYCHAIN_PROFILE=kpxc-gh-notary"
+          fi
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DWITH_TESTS=OFF \
+            -DWITH_GUI_TESTS=OFF \
+            -DWITH_XC_DOCS=OFF \
+            -DOVERRIDE_VERSION="${{ inputs.version }}" \
+            -DKEEPASSXC_BUILD_TYPE=Release \
+            "-DGIT_HEAD_OVERRIDE=${GITHUB_SHA:0:7}" \
+            $EXTRA
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package DMG
+        working-directory: build
+        run: cpack -G DragNDrop
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepassxc-macos
+          path: build/KeePassXC-*.dmg
+          if-no-files-found: error
+
+  build-linux:
+    name: Linux (tarball + GPG optionnel)
+    needs: validate-signing
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            dpkg-dev \
+            libbotan-2-dev libargon2-dev libminizip-dev zlib1g-dev \
+            libqrencode-dev libreadline-dev \
+            qtbase5-dev qttools5-dev qttools5-dev-tools libqt5svg5-dev \
+            libqt5x11extras5-dev libxi-dev libxtst-dev libssl-dev \
+            libpcsclite-dev libusb-1.0-0-dev
+
+      - name: Configure and build
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DWITH_TESTS=OFF \
+            -DWITH_GUI_TESTS=OFF \
+            -DWITH_XC_DOCS=OFF \
+            -DOVERRIDE_VERSION="${{ inputs.version }}" \
+            -DKEEPASSXC_BUILD_TYPE=Release \
+            "-DGIT_HEAD_OVERRIDE=${GITHUB_SHA:0:7}"
+          cmake --build build --parallel
+
+      - name: Build Debian package (.deb)
+        working-directory: build
+        run: cpack -G DEB
+
+      - name: Install to staging
+        run: DESTDIR="${{ github.workspace }}/staging" cmake --install build --prefix /usr
+
+      - name: Create tarball
+        id: tar
+        run: |
+          SAFE_VER=$(echo "${{ inputs.version }}" | tr '/ ' '__')
+          NAME="KeePassXC-${SAFE_VER}-linux-x86_64"
+          tar -C "${{ github.workspace }}/staging" -czf "${{ github.workspace }}/${NAME}.tar.gz" .
+          echo "archive=${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Import GPG key and sign
+        if: ${{ inputs.sign_linux_gpg == true && needs.validate-signing.outputs.gpg_sign == 'true' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_RELEASE_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_RELEASE_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_RELEASE_KEY_ID }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          ARCHIVE="${{ steps.tar.outputs.archive }}"
+          if [ -n "$GPG_PASSPHRASE" ]; then
+            echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+              --detach-sign --armor -u "$GPG_KEY_ID" -o "${ARCHIVE}.asc" "$ARCHIVE"
+          else
+            gpg --batch --yes --detach-sign --armor -u "$GPG_KEY_ID" -o "${ARCHIVE}.asc" "$ARCHIVE"
+          fi
+
+      - name: Collect Linux artifacts
+        run: |
+          mkdir -p dist-linux
+          cp "${{ github.workspace }}/${{ steps.tar.outputs.archive }}" dist-linux/
+          if [ -f "${{ github.workspace }}/${{ steps.tar.outputs.archive }}.asc" ]; then
+            cp "${{ github.workspace }}/${{ steps.tar.outputs.archive }}.asc" dist-linux/
+          fi
+          find "${{ github.workspace }}/build" -name '*.deb' -exec cp -v {} dist-linux/ \;
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepassxc-linux
+          path: dist-linux/*
+          if-no-files-found: error
+
+  publish:
+    name: Create GitHub Release
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute release tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            echo "name=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            SAFE=$(echo "${{ inputs.version }}" | tr '/ ' '__')
+            echo "name=release-${SAFE}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Flatten release files
+        run: |
+          mkdir -p upload
+          find release-assets -type f \( -name '*.zip' -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*.asc' -o -name '*.deb' \) -exec cp -f {} upload/ \;
+          ls -la upload/
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: KeePassXC ${{ inputs.version }}
+          tag_name: ${{ steps.tag.outputs.name }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: upload/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -616,3 +616,24 @@ endif()
 # The install commands in this subdirectory will be executed after all the install commands in the
 # current scope are ran. It is required for correct functioning of macdeployqt.
 add_subdirectory(post_install)
+
+if(UNIX AND NOT APPLE)
+    # Paquet .deb (CPack) — utilisé notamment par la CI (GitHub Actions).
+    # Depends: est rempli via dpkg-shlibdeps (paquet dpkg-dev sur le système de build).
+    set(CPACK_GENERATOR "DEB")
+    set(CPACK_PACKAGE_NAME "keepassxc")
+    set(CPACK_DEBIAN_PACKAGE_NAME "keepassxc")
+    set(CPACK_PACKAGE_VENDOR "KeePassXC Team")
+    set(CPACK_PACKAGE_CONTACT "team@keepassxc.org")
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "KeePassXC Team <team@keepassxc.org>")
+    set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+    set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://keepassxc.org")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Cross-platform password manager")
+    set(CPACK_PACKAGE_DESCRIPTION
+        "KeePassXC is a community fork of KeePass, a free open source password manager.")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.GPL-2")
+    set(CPACK_PACKAGE_VERSION "${KEEPASSXC_VERSION}")
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    set(CPACK_STRIP_FILES ON)
+    include(CPack)
+endif()

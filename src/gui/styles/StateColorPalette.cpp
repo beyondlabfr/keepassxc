@@ -38,10 +38,10 @@ void StateColorPalette::initDefaultPaletteLight()
     setColor(ColorRole::HealthCritical, QStringLiteral("#C43F31"));
     setColor(ColorRole::HealthBad, QStringLiteral("#E07F16"));
     setColor(ColorRole::HealthWeak, QStringLiteral("#FFD30F"));
-    setColor(ColorRole::HealthOk, QStringLiteral("#5EA10E"));
-    setColor(ColorRole::HealthExcellent, QStringLiteral("#118f17"));
+    setColor(ColorRole::HealthOk, QStringLiteral("#FF9900"));
+    setColor(ColorRole::HealthExcellent, QStringLiteral("#E08600"));
 
-    setColor(ColorRole::True, QStringLiteral("#5EA10E"));
+    setColor(ColorRole::True, QStringLiteral("#FF9900"));
     setColor(ColorRole::False, QStringLiteral("#C43F31"));
 }
 
@@ -55,9 +55,9 @@ void StateColorPalette::initDefaultPaletteDark()
     setColor(ColorRole::HealthCritical, QStringLiteral("#C43F31"));
     setColor(ColorRole::HealthBad, QStringLiteral("#DB9837"));
     setColor(ColorRole::HealthWeak, QStringLiteral("#F0C400"));
-    setColor(ColorRole::HealthOk, QStringLiteral("#608A22"));
-    setColor(ColorRole::HealthExcellent, QStringLiteral("#1F8023"));
+    setColor(ColorRole::HealthOk, QStringLiteral("#FFaa33"));
+    setColor(ColorRole::HealthExcellent, QStringLiteral("#CC7A00"));
 
-    setColor(ColorRole::True, QStringLiteral("#608A22"));
+    setColor(ColorRole::True, QStringLiteral("#FFaa33"));
     setColor(ColorRole::False, QStringLiteral("#C43F31"));
 }
