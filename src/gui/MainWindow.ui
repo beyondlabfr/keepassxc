@@ -449,6 +449,26 @@
    <addaction name="actionSettings"/>
    <addaction name="separator"/>
   </widget>
+  <widget class="QToolBar" name="searchToolBar">
+   <property name="windowTitle">
+    <string>Search</string>
+   </property>
+   <property name="contextMenuPolicy">
+    <enum>Qt::PreventContextMenu</enum>
+   </property>
+   <property name="movable">
+    <bool>false</bool>
+   </property>
+   <property name="floatable">
+    <bool>false</bool>
+   </property>
+   <attribute name="toolBarArea">
+    <enum>TopToolBarArea</enum>
+   </attribute>
+   <attribute name="toolBarBreak">
+    <bool>true</bool>
+   </attribute>
+  </widget>
   <action name="actionQuit">
    <property name="text">
     <string>&amp;Quit</string>

@@ -22,9 +22,11 @@
 #include <QCloseEvent>
 #include <QDesktopServices>
 #include <QDir>
+#include <QHBoxLayout>
 #include <QFileInfo>
 #include <QList>
 #include <QMimeData>
+#include <QSizePolicy>
 #include <QShortcut>
 #include <QStatusBar>
 #include <QTimer>
@@ -115,21 +117,34 @@ MainWindow::MainWindow()
         m_ui->toolBar->setIconSize({20, 20});
     }
 
-    // Setup the search widget in the toolbar
-    m_searchWidget = new SearchWidget();
+    // Search on its own toolbar row below the main icon toolbar.
+    // QToolBar::addWidget() only allocates the widget's minimum width and often aligns it to the
+    // trailing edge; wrap in a row that stretches so the field spans the full window width.
+    auto* searchBarRow = new QWidget(this);
+    searchBarRow->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    auto* searchBarLayout = new QHBoxLayout(searchBarRow);
+    searchBarLayout->setContentsMargins(4, 2, 4, 2);
+    searchBarLayout->setSpacing(0);
+    m_searchWidget = new SearchWidget(searchBarRow);
+    m_searchWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_searchWidget->connectSignals(m_actionMultiplexer);
-    m_searchWidgetAction = m_ui->toolBar->addWidget(m_searchWidget);
+    searchBarLayout->addWidget(m_searchWidget, 1);
+    m_searchWidgetAction = m_ui->searchToolBar->addWidget(searchBarRow);
     m_searchWidgetAction->setEnabled(false);
 
     new QShortcut(QKeySequence::Find, this, SLOT(focusSearchWidget()));
 
     connect(m_searchWidget, &SearchWidget::searchCanceled, this, [this] {
         m_ui->toolBar->setExpanded(false);
-        m_ui->toolBar->setVisible(!config()->get(Config::GUI_HideToolbar).toBool());
+        const bool showTb = !config()->get(Config::GUI_HideToolbar).toBool();
+        m_ui->toolBar->setVisible(showTb);
+        m_ui->searchToolBar->setVisible(true);
     });
     connect(m_searchWidget, &SearchWidget::lostFocus, this, [this] {
         m_ui->toolBar->setExpanded(false);
-        m_ui->toolBar->setVisible(!config()->get(Config::GUI_HideToolbar).toBool());
+        const bool showTb = !config()->get(Config::GUI_HideToolbar).toBool();
+        m_ui->toolBar->setVisible(showTb);
+        m_ui->searchToolBar->setVisible(true);
     });
 
     m_countDefaultAttributes = m_ui->menuEntryCopyAttribute->actions().size();
@@ -590,6 +605,7 @@ MainWindow::MainWindow()
     auto* eventFilter = new MainWindowEventFilter(this);
     m_ui->menubar->installEventFilter(eventFilter);
     m_ui->toolBar->installEventFilter(eventFilter);
+    m_ui->searchToolBar->installEventFilter(eventFilter);
     m_ui->tabWidget->tabBar()->installEventFilter(eventFilter);
     installEventFilter(eventFilter);
 
@@ -1530,7 +1546,9 @@ bool MainWindow::focusNextPrevChild(bool next)
 void MainWindow::focusSearchWidget()
 {
     if (m_searchWidgetAction->isEnabled()) {
-        m_ui->toolBar->setVisible(true);
+        const bool showMainTb = !config()->get(Config::GUI_HideToolbar).toBool();
+        m_ui->toolBar->setVisible(showMainTb);
+        m_ui->searchToolBar->setVisible(true);
         m_ui->toolBar->setExpanded(true);
         m_searchWidget->focusSearch();
     }
@@ -1539,12 +1557,14 @@ void MainWindow::focusSearchWidget()
 void MainWindow::enableMenuAndToolbar()
 {
     m_ui->toolBar->setDisabled(false);
+    m_ui->searchToolBar->setDisabled(false);
     m_ui->menubar->setDisabled(false);
 }
 
 void MainWindow::disableMenuAndToolbar()
 {
     m_ui->toolBar->setDisabled(true);
+    m_ui->searchToolBar->setDisabled(true);
     m_ui->menubar->setDisabled(true);
 }
 
@@ -1569,6 +1589,13 @@ void MainWindow::restoreWindowInformation()
 {
     restoreGeometry(config()->get(Config::GUI_MainWindowGeometry).toByteArray());
     restoreState(config()->get(Config::GUI_MainWindowState).toByteArray());
+
+    // Force search toolbar onto its own row below the main toolbar,
+    // regardless of what restoreState() recovered from saved layout.
+    addToolBar(Qt::TopToolBarArea, m_ui->toolBar);
+    addToolBarBreak(Qt::TopToolBarArea);
+    addToolBar(Qt::TopToolBarArea, m_ui->searchToolBar);
+    m_ui->searchToolBar->setVisible(true);
 }
 
 bool MainWindow::saveLastDatabases()
@@ -1741,12 +1768,16 @@ void MainWindow::applySettingsChanges()
     m_ui->menubar->setMaximumHeight(hideMenubar ? 0 : QWIDGETSIZE_MAX);
 #endif
 
-    m_ui->toolBar->setHidden(config()->get(Config::GUI_HideToolbar).toBool());
+    m_ui->toolBar->setHidden(hideToolbar);
+    m_ui->searchToolBar->setHidden(false);
     auto movable = config()->get(Config::GUI_MovableToolbar).toBool();
     m_ui->toolBar->setMovable(movable);
+    m_ui->searchToolBar->setMovable(movable);
     if (!movable) {
-        // Move the toolbar back to the top of the main window
+        // Move the toolbars back to the top of the main window (icons first, search row below)
         addToolBar(Qt::TopToolBarArea, m_ui->toolBar);
+        addToolBarBreak(Qt::TopToolBarArea);
+        addToolBar(Qt::TopToolBarArea, m_ui->searchToolBar);
     }
 
     bool isOk = false;
@@ -2293,6 +2324,12 @@ bool MainWindowEventFilter::eventFilter(QObject* watched, QEvent* event)
             }
         } else if (watched == mainWindow->m_ui->toolBar) {
             if (!mainWindow->m_ui->toolBar->isMovable() || mainWindow->m_ui->toolBar->cursor() != Qt::SizeAllCursor) {
+                mainWindow->windowHandle()->startSystemMove();
+                return false;
+            }
+        } else if (watched == mainWindow->m_ui->searchToolBar) {
+            if (!mainWindow->m_ui->searchToolBar->isMovable()
+                || mainWindow->m_ui->searchToolBar->cursor() != Qt::SizeAllCursor) {
                 mainWindow->windowHandle()->startSystemMove();
                 return false;
             }

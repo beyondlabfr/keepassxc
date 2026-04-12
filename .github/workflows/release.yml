@@ -179,9 +179,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Ninja doit être dans le PATH avant CMake (-G Ninja). vcpkg / ports peuvent aussi en avoir besoin.
-      - name: Install Ninja
-        run: brew install ninja
+      # Triplet explicite : vcpkg et CMake doivent utiliser le même (arm64 vs x64 selon le runner).
+      - name: Set VCPKG_DEFAULT_TRIPLET
+        run: |
+          case "$(uname -m)" in
+            arm64) echo "VCPKG_DEFAULT_TRIPLET=arm64-osx" >> "$GITHUB_ENV" ;;
+            x86_64) echo "VCPKG_DEFAULT_TRIPLET=x64-osx" >> "$GITHUB_ENV" ;;
+            *) echo "::error::Architecture non gérée: $(uname -m)"; exit 1 ;;
+          esac
+          echo "Triplet: $(grep VCPKG_DEFAULT_TRIPLET "$GITHUB_ENV" | cut -d= -f2)"
+
+      # Ninja + binaires Homebrew en tête de PATH (vcpkg invoque CMake/Ninja en sous-processus).
+      - name: Install Ninja and Homebrew PATH
+        run: |
+          brew install ninja
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          command -v ninja && ninja --version
 
       - name: Clone vcpkg
         run: |
@@ -189,6 +202,12 @@ jobs:
           cd "$VCPKG_UPSTREAM_ROOT"
           git checkout ${{ env.VCPKG_COMMIT }}
           ./bootstrap-vcpkg.sh
+
+      # Pré-installe le manifest hors CMake : logs plus clairs et même PATH que la suite.
+      - name: vcpkg install (manifest)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          "$VCPKG_UPSTREAM_ROOT/vcpkg" install
 
       - name: Import Apple code signing certificates
         if: ${{ inputs.sign_macos == true && needs.validate-signing.outputs.mac_sign == 'true' }}
@@ -225,6 +244,7 @@ jobs:
           fi
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_MAKE_PROGRAM=$(command -v ninja)" \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_UPSTREAM_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DWITH_TESTS=OFF \
             -DWITH_GUI_TESTS=OFF \
@@ -275,7 +295,7 @@ jobs:
             dpkg-dev \
             libbotan-2-dev libargon2-dev libminizip-dev zlib1g-dev \
             libqrencode-dev libreadline-dev libkeyutils-dev \
-            qtbase5-dev qttools5-dev qttools5-dev-tools libqt5svg5-dev \
+            qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools libqt5svg5-dev \
             libqt5x11extras5-dev libxi-dev libxtst-dev libssl-dev \
             libpcsclite-dev libusb-1.0-0-dev
 
