@@ -24,6 +24,10 @@
 #include <botan/ecdsa.h>
 #include <botan/ed25519.h>
 #include <botan/rsa.h>
+#include <botan/version.h>
+#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(3, 11, 0)
+#include <botan/ec_group.h>
+#endif
 
 namespace OpenSSHKeyGen
 {
@@ -77,7 +81,7 @@ namespace OpenSSHKeyGen
             key.setPrivateData(privateData);
             key.setComment("id_rsa");
             return true;
-        } catch (std::exception& e) {
+        } catch (const std::exception&) {
             return false;
         }
     }
@@ -108,7 +112,7 @@ namespace OpenSSHKeyGen
             key.setPrivateData(privateData);
             key.setComment("id_ecdsa");
             return true;
-        } catch (std::exception& e) {
+        } catch (const std::exception&) {
             return false;
         }
     }
@@ -139,7 +143,7 @@ namespace OpenSSHKeyGen
             key.setPrivateData(privateData);
             key.setComment("id_ed25519");
             return true;
-        } catch (std::exception& e) {
+        } catch (const std::exception&) {
             return false;
         }
     }
