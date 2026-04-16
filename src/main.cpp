@@ -19,6 +19,7 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFile>
+#include <QOperatingSystemVersion>
 #include <QThreadPool>
 #include <QWindow>
 
@@ -47,6 +48,15 @@ Q_IMPORT_PLUGIN(QXcbIntegrationPlugin)
 
 #ifdef Q_OS_WIN
 #include <windows.h>
+#endif
+
+#ifdef Q_OS_WIN
+static bool isWindows11OrLater()
+{
+    // Windows 11 starts at build 22000 (10.0.22000+).
+    const auto os = QOperatingSystemVersion::current();
+    return os.majorVersion() == 10 && os.minorVersion() == 0 && os.microVersion() >= 22000;
+}
 #endif
 
 int main(int argc, char** argv)
@@ -201,7 +211,15 @@ int main(int argc, char** argv)
 
     // Disable screen capture if not explicitly allowed
     // This ensures any top-level windows (Main Window, Modal Dialogs, etc.) are excluded from screenshots
-    mainWindow.setAllowScreenCapture(parser.isSet(allowScreenCaptureOption));
+    bool allowScreenCapture = parser.isSet(allowScreenCaptureOption);
+#ifdef Q_OS_WIN
+    // Work around platform/driver issues with WDA_EXCLUDEFROMCAPTURE on some Windows 11 systems.
+    // If the user did not explicitly request capture blocking, default to allowing capture on Windows 11.
+    if (!allowScreenCapture && isWindows11OrLater()) {
+        allowScreenCapture = true;
+    }
+#endif
+    mainWindow.setAllowScreenCapture(allowScreenCapture);
 
     const bool pwstdin = parser.isSet(pwstdinOption);
     for (const QString& filename : fileNames) {

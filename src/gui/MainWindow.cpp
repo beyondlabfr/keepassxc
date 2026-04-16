@@ -1795,11 +1795,27 @@ void MainWindow::applySettingsChanges()
 void MainWindow::setAllowScreenCapture(bool state)
 {
     m_allowScreenCapture = state;
+    bool failedToPrevent = false;
     for (auto window : qApp->topLevelWindows()) {
         if (window->isVisible()) {
-            osUtils->setPreventScreenCapture(window, !m_allowScreenCapture);
+            if (!osUtils->setPreventScreenCapture(window, !m_allowScreenCapture) && !m_allowScreenCapture) {
+                failedToPrevent = true;
+            }
         }
     }
+
+    // If the platform does not support blocking capture (or fails unexpectedly), fall back to allowing capture.
+    if (failedToPrevent) {
+        m_allowScreenCapture = true;
+        for (auto window : qApp->topLevelWindows()) {
+            if (window->isVisible()) {
+                osUtils->setPreventScreenCapture(window, false);
+            }
+        }
+        displayGlobalMessage(QObject::tr("Warning: Failed to block screenshot capture. Falling back to allowing screen capture."),
+                             MessageWidget::Error);
+    }
+
     m_ui->actionAllowScreenCapture->blockSignals(true);
     m_ui->actionAllowScreenCapture->setChecked(m_allowScreenCapture);
     m_ui->actionAllowScreenCapture->blockSignals(false);
