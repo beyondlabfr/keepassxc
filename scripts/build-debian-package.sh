@@ -4,6 +4,7 @@
 # Usage :
 #   ./scripts/build-debian-package.sh
 #   INSTALL_DEPS=1 ./scripts/build-debian-package.sh    # installe les deps de build (apt)
+#   ./scripts/build-debian-package.sh -release          # force un build "Release" (supprime l'avertissement "version instable")
 #
 # Variables utiles :
 #   BUILD_DIR          Répertoire de compilation (défaut : <racine>/build-deb)
@@ -29,6 +30,7 @@ DEB_REVISION="${DEB_REVISION:-1}"
 WITH_XC_DOCS="${WITH_XC_DOCS:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 INSTALL_DEPS="${INSTALL_DEPS:-0}"
+FORCE_RELEASE="${FORCE_RELEASE:-0}"
 
 die() { echo "Erreur: $*" >&2; exit 1; }
 
@@ -36,6 +38,35 @@ die() { echo "Erreur: $*" >&2; exit 1; }
 
 command -v cmake >/dev/null || die "cmake est requis."
 command -v dpkg-deb >/dev/null || die "dpkg-deb est requis (paquet dpkg-dev)."
+
+usage() {
+  sed -n '1,40p' "$0"
+  cat <<'EOF'
+
+Options:
+  -release, --release   Force -DKEEPASSXC_BUILD_TYPE=Release (supprime l'avertissement "version instable")
+  -h, --help            Affiche cette aide
+
+Note:
+  Tu peux aussi passer des options CMake via EXTRA_CMAKE_ARGS.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -release|--release)
+      FORCE_RELEASE="1"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Option inconnue: $1 (utilise --help)"
+      ;;
+  esac
+done
 
 extract_cmake_string_var() {
   local var="$1"
@@ -90,6 +121,13 @@ fi
 
 DOCS_FLAG="-DWITH_XC_DOCS=OFF"
 [[ "${WITH_XC_DOCS}" == "1" ]] && DOCS_FLAG="-DWITH_XC_DOCS=ON"
+
+if [[ "${FORCE_RELEASE}" == "1" ]]; then
+  # N'écrase pas une config explicite si l'utilisateur l'a déjà fournie
+  if [[ "${EXTRA_CMAKE_ARGS:-}" != *"KEEPASSXC_BUILD_TYPE"* ]]; then
+    EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS:-} -DKEEPASSXC_BUILD_TYPE=Release"
+  fi
+fi
 
 if [[ "${SKIP_BUILD}" != "1" ]]; then
   echo "==> Configuration CMake (${CMAKE_GENERATOR}) dans ${BUILD_DIR}…"
