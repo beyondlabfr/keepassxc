@@ -600,6 +600,49 @@ if(WIN32)
 
             install(FILES ${OPENSSL_DLL} ${CRYPTO_DLL} DESTINATION ".")
         endif()
+    else()
+        # vcpkg builds: deploy Qt + runtime dependencies into the install prefix
+        #
+        # Note: windeployqt queries qmake at runtime; ensure qmake is reachable via PATH.
+        # vcpkg layout provides qmake under: <prefix>/tools/qt5/bin
+        set(_vcpkg_qt_tools_bin "${Qt5_PREFIX}/tools/qt5/bin")
+        set(_vcpkg_bin_dir "${Qt5_PREFIX}/bin")
+
+        # Use windeployqt.exe to setup Qt dependencies (platform plugins, imageformats, etc.)
+        set(_wdq_install_code [==[
+            # Normalize PATH to avoid invalid backslash escapes in CMake scripts on Windows
+            set(_env_path "$ENV{PATH}")
+            string(REPLACE "\\" "/" _env_path "${_env_path}")
+
+            # Escape semicolons to prevent CMake list-splitting of the PATH argument
+            set(_deploy_path "@VCPKG_QT_TOOLS_BIN@;@VCPKG_BIN_DIR@;${_env_path}")
+            string(REPLACE ";" "\\;" _deploy_path "${_deploy_path}")
+
+            execute_process(
+                COMMAND "${CMAKE_COMMAND}" -E env "PATH=${_deploy_path}" "@WINDEPLOYQT_EXE@" --release --no-angle --no-opengl-sw --dir "${CMAKE_INSTALL_PREFIX}" "${CMAKE_INSTALL_PREFIX}/@PROGNAME@.exe"
+                RESULT_VARIABLE _wdq_res
+                OUTPUT_VARIABLE _wdq_out
+                ERROR_VARIABLE _wdq_err
+            )
+
+            if(_wdq_res)
+                message(FATAL_ERROR "windeployqt failed (exit=${_wdq_res}).\nSTDOUT:\n${_wdq_out}\nSTDERR:\n${_wdq_err}\n")
+            endif()
+        ]==])
+        # Provide values for string(CONFIGURE @ONLY) substitution
+        set(VCPKG_QT_TOOLS_BIN "${_vcpkg_qt_tools_bin}")
+        set(VCPKG_BIN_DIR "${_vcpkg_bin_dir}")
+        set(WINDEPLOYQT_EXE "${WINDEPLOYQT_EXE}")
+        set(PROGNAME "${PROGNAME}")
+        string(CONFIGURE "${_wdq_install_code}" _wdq_install_code @ONLY)
+        install(CODE "${_wdq_install_code}" COMPONENT Runtime)
+
+        # Copy all runtime DLLs from the vcpkg prefix into the install directory
+        # (includes qrencode.dll, botan-3.dll, argon2.dll, Qt5*.dll, OpenSSL, etc.)
+        install(DIRECTORY "${_vcpkg_bin_dir}/"
+                DESTINATION "."
+                COMPONENT Runtime
+                FILES_MATCHING PATTERN "*.dll")
     endif()
 
     # install CA cert chains
