@@ -67,7 +67,7 @@ QPalette LightStyle::standardPalette() const
     palette.setColor(QPalette::Inactive, QPalette::AlternateBase, QRgb(0xFFF6EB));
     palette.setColor(QPalette::Disabled, QPalette::AlternateBase, QRgb(0xF5E6D0));
 
-    palette.setColor(QPalette::All, QPalette::ToolTipBase, QRgb(0xFF9900));
+    palette.setColor(QPalette::All, QPalette::ToolTipBase, QRgb(0xDB760F));
     palette.setColor(QPalette::All, QPalette::ToolTipText, QRgb(0xF9F9F9));
 
     palette.setColor(QPalette::Active, QPalette::Button, QRgb(0xD4D5DD));
@@ -78,9 +78,10 @@ QPalette LightStyle::standardPalette() const
     palette.setColor(QPalette::Inactive, QPalette::ButtonText, QRgb(0x454A54));
     palette.setColor(QPalette::Disabled, QPalette::ButtonText, QRgb(0x97979B));
 
-    palette.setColor(QPalette::Active, QPalette::Highlight, QRgb(0xFF9900));
-    palette.setColor(QPalette::Inactive, QPalette::Highlight, QRgb(0xFFCC80));
-    palette.setColor(QPalette::Disabled, QPalette::Highlight, QRgb(0xFFDDB3));
+    // Accent orange (fork): base = #DB760F
+    palette.setColor(QPalette::Active, QPalette::Highlight, QRgb(0xDB760F));
+    palette.setColor(QPalette::Inactive, QPalette::Highlight, QRgb(0xF19536));
+    palette.setColor(QPalette::Disabled, QPalette::Highlight, QRgb(0xF6BD82));
 
     palette.setColor(QPalette::Active, QPalette::HighlightedText, QRgb(0xFFFFFF));
     palette.setColor(QPalette::Inactive, QPalette::HighlightedText, QRgb(0x252528));
@@ -92,9 +93,9 @@ QPalette LightStyle::standardPalette() const
     palette.setColor(QPalette::All, QPalette::Dark, QRgb(0xBBBBC2));
     palette.setColor(QPalette::All, QPalette::Shadow, QRgb(0x6C6D79));
 
-    palette.setColor(QPalette::All, QPalette::Link, QRgb(0xE08600));
+    palette.setColor(QPalette::All, QPalette::Link, QRgb(0xDB760F));
     palette.setColor(QPalette::Disabled, QPalette::Link, QRgb(0xB87A20));
-    palette.setColor(QPalette::All, QPalette::LinkVisited, QRgb(0xCC7A00));
+    palette.setColor(QPalette::All, QPalette::LinkVisited, QRgb(0xB85F0A));
     palette.setColor(QPalette::Disabled, QPalette::LinkVisited, QRgb(0xB87A20));
 
     return palette;

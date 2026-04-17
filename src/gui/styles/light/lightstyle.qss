@@ -10,16 +10,22 @@ EntryPreviewWidget *:disabled[blendIn="true"] {
     background-color: #EDEDED;
 }
 
+QPushButton:default,
+QPushButton:checked {
+    background: #DB760F;
+    color: #F9F9F9;
+}
+
 QPushButton:default:hover, QPushButton:checked:hover {
     /* Using slightly lighter shade from palette(highlight) */
-    background: #FFaa00;
+    background: #B85F0A;
 }
 
 QToolTip {
     color: #F9F9F9;
-    background-color: #FF9900;
+    background-color: #B85F0A;
 }
 
 QGroupBox::title {
-    color: #E08600;
+    color: #B85F0A;
 }

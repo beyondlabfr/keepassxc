@@ -26,12 +26,12 @@ QPushButton:!default:hover {
 
 QPushButton:default:hover, QPushButton:checked:hover {
     /* Using slightly lighter shade from palette(highlight) */
-    background: #6B4000;
+    background: #DB760F;
 }
 
 QToolTip {
     color: #BFBFBF;
-    background-color: #6B4000;
+    background-color: #DB760F;
 }
 
 QGroupBox {
