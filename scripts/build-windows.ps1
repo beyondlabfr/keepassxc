@@ -60,7 +60,8 @@ New-Item -ItemType Directory -Force -Path $buildPath | Out-Null
 
 $cmakeArgs = @(
     "-G", "Ninja",
-    "-DWITH_XC_ALL=ON",
+    # Qt6 (and QtKeychain) built by vcpkg, see the "qt" feature of vcpkg.json
+    "-DWITH_BUILD_QT=ON",
     "-DKEEPASSXC_BUILD_TYPE=$KeePassXCBuildType",
     "-DCMAKE_BUILD_TYPE=$BuildType",
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain",

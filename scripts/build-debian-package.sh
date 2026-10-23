@@ -100,9 +100,9 @@ if [[ "${INSTALL_DEPS}" == "1" ]]; then
   sudo apt-get install -y --no-install-recommends \
     build-essential cmake pkg-config \
     libbotan-2-dev libargon2-dev libminizip-dev zlib1g-dev \
-    libqrencode-dev libreadline-dev \
-    qtbase5-dev qttools5-dev qttools5-dev-tools libqt5svg5-dev \
-    libqt5x11extras5-dev libqt5x11extras5 \
+    libqrencode-dev libreadline-dev libkeyutils-dev \
+    qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools qt6-base-dev-tools \
+    qt6-svg-dev qt6-5compat-dev qt6-l10n-tools qtkeychain-qt6-dev \
     libxi-dev libxtst-dev \
     libssl-dev \
     libpcsclite-dev \
@@ -119,8 +119,8 @@ else
   CMAKE_GENERATOR="${CMAKE_GENERATOR:-Ninja}"
 fi
 
-DOCS_FLAG="-DWITH_XC_DOCS=OFF"
-[[ "${WITH_XC_DOCS}" == "1" ]] && DOCS_FLAG="-DWITH_XC_DOCS=ON"
+DOCS_FLAG="-DKPXC_FEATURE_DOCS=OFF"
+[[ "${WITH_XC_DOCS}" == "1" ]] && DOCS_FLAG="-DKPXC_FEATURE_DOCS=ON"
 
 if [[ "${FORCE_RELEASE}" == "1" ]]; then
   # N'écrase pas une config explicite si l'utilisateur l'a déjà fournie
@@ -196,7 +196,7 @@ fi
 
 if [[ -z "${DEPENDS_LINE}" ]]; then
   echo "Note: dpkg-shlibdeps a échoué ou est absent — utilisation d'une liste Depends générique."
-  DEPENDS_LINE="libc6 (>= 2.31), libstdc++6 (>= 10), libgcc-s1, libqt5core5a | libqt5core5, libqt5gui5, libqt5widgets5, libqt5dbus5, libqt5network5, libqt5svg5, libqt5concurrent5, libqt5x11extras5, libbotan-2-19 | libbotan-2-18 | libbotan-2-17, libargon2-1, zlib1g, libqrencode4, libreadline8, libminizip1, libssl3 | libssl1.1, libx11-6, libxi6, libxtst6"
+  DEPENDS_LINE="libc6 (>= 2.34), libstdc++6 (>= 13), libgcc-s1, libqt6core6t64 | libqt6core6, libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6, libqt6dbus6t64 | libqt6dbus6, libqt6network6t64 | libqt6network6, libqt6svg6, libqt6svgwidgets6, libqt6concurrent6t64 | libqt6concurrent6, libqt6keychain1, libbotan-2-19, libargon2-1, zlib1g, libqrencode4, libreadline8t64 | libreadline8, libminizip1t64 | libminizip1, libkeyutils1, libpcsclite1, libusb-1.0-0, libx11-6, libxi6, libxtst6"
 fi
 
 cat > "${STAGING}/DEBIAN/control" <<EOF

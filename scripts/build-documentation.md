@@ -87,23 +87,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1 
 
 ## Ubuntu / Debian (.deb)
 
-### Pré-requis (exemples Ubuntu/Debian)
+### Pré-requis (Ubuntu 24.04)
 
-Le script `./scripts/build-debian-package.sh` dépend du contenu exact du script et de ta distro, mais en général il te faut :
-- **toolchain** : `build-essential`, `cmake`, `ninja-build` (ou `make`), `pkg-config`
-- **Qt** : Qt5 (dev) et ses outils (ou Qt6 si tu adaptes le projet)
-- **autres** : `git`, `asciidoctor` (pour la doc), etc.
+Depuis la fusion de l'upstream d'octobre 2026, KeePassXC est en **Qt6** (6.2.4 minimum). Le plus simple est
+`INSTALL_DEPS=1 ./scripts/build-debian-package.sh`, qui installe exactement les paquets attendus, ou de compiler
+dans un conteneur `ubuntu:24.04` pour ne rien installer sur la machine.
 
-Sur une machine neuve, commence par lire/ouvrir le script pour voir la liste exacte des paquets attendus, puis adapte selon ta version d’Ubuntu/Debian.
+- **toolchain** : `build-essential`, `cmake`, `ninja-build`, `pkg-config`
+- **Qt6** : `qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools qt6-base-dev-tools qt6-svg-dev qt6-5compat-dev qt6-l10n-tools`
+- **WebDAV** : `qtkeychain-qt6-dev` (optionnel : sans lui, le mot de passe WebDAV ne peut pas être mémorisé)
+- **autres** : `libbotan-2-dev libargon2-dev libminizip-dev zlib1g-dev libqrencode-dev libreadline-dev libkeyutils-dev libpcsclite-dev libusb-1.0-0-dev libxi-dev libxtst-dev libssl-dev`
 
 ### Build “dev” (sans .deb)
 
-Depuis la racine du repo :
+Depuis la racine du repo (toutes les fonctions sont activées par défaut, options `KPXC_FEATURE_*`) :
 
 ```bash
 mkdir -p build
 cd build
-cmake -DWITH_XC_ALL=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake -DKPXC_FEATURE_DOCS=OFF -DCMAKE_BUILD_TYPE=Release ..
 ninja -j"$(nproc)"
 ```
 
@@ -115,7 +117,7 @@ Exécutable généré (en général) :
 ```bash
 mkdir -p build
 cd build
-cmake -DWITH_XC_ALL=ON -DWITH_TESTS=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake -DKPXC_FEATURE_DOCS=OFF -DWITH_TESTS=ON -DCMAKE_BUILD_TYPE=Release ..
 ninja -j"$(nproc)"
 ctest --output-on-failure
 ```
@@ -136,3 +138,38 @@ Exemple (aide) :
 ```bash
 python3 release-tool.py build -h
 ```
+
+## WebDAV (ajout du fork)
+
+Menu **Base de données > Ouvrir une base WebDAV**, ou une URL `https://…` / `webdavs://…` dans les bases récentes.
+Le comportement suit celui de KeePass 2 :
+
+- **Ouverture directe** depuis le serveur, sans copie locale.
+- **Enregistrement** : si la base a changé sur le serveur depuis son ouverture (ETag, ou empreinte du début du
+  fichier quand le serveur ne donne pas d'ETag fiable), KeePassXC propose la même question que pour un fichier
+  local modifié : *fusionner puis enregistrer*, *écraser*, *abandonner mes changements* ou *annuler*.
+- **Écriture sûre** : la base est envoyée dans `base.kdbx.<aléa>.tmp` puis renommée sur le serveur (`MOVE`) ;
+  un envoi raté ne laisse donc jamais de base tronquée. Si le serveur refuse le renommage, envoi direct. Seul le
+  mode « écriture directe » des réglages d'enregistrement envoie directement (avec `If-Match` quand le serveur
+  donne un ETag fiable).
+- **Identifiants** : *Mémoriser* = rien, l'identifiant, ou l'identifiant et le mot de passe. Le mot de passe va
+  dans le **trousseau du système** (Secret Service / KWallet, Gestionnaire d'identification Windows, Trousseau
+  macOS) via QtKeychain, jamais dans `keepassxc.ini`. Les mots de passe laissés en clair dans `keepassxc.ini`
+  par les anciennes versions du fork sont déplacés vers le trousseau (ou effacés s'il n'y en a pas) au premier
+  lancement. Pendant la session, ils restent en mémoire pour le verrouillage et le rechargement.
+- Si l'intégration Secret Service de KeePassXC est activée, il est lui-même le trousseau : le mot de passe WebDAV
+  n'est alors pas mémorisé d'une session à l'autre.
+- Une adresse `http://` (ou `webdav://`) avec mot de passe déclenche un avertissement : le mot de passe circule
+  en clair.
+
+### Tests WebDAV
+
+`tests/TestWebDav.cpp` tourne contre un vrai serveur Apache (Docker, configuration `tests/webdav/httpd.conf`) :
+ETag fort, sans ETag, `MOVE` refusé, réponses gzip, redirection, mauvais mot de passe, modification concurrente.
+
+```bash
+scripts/test-webdav.sh build/tests/testwebdav
+```
+
+Sans serveur (`KPXC_TEST_WEBDAV_URL` absent), le test est sauté par `ctest`.
+

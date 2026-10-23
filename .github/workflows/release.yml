@@ -150,7 +150,8 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_UPSTREAM_ROOT }}/scripts/buildsystems/vcpkg.cmake" `
             -DWITH_TESTS=OFF `
             -DWITH_GUI_TESTS=OFF `
-            -DWITH_XC_DOCS=OFF `
+            -DKPXC_FEATURE_DOCS=OFF `
+            -DWITH_BUILD_QT=ON `
             "-DOVERRIDE_VERSION=${{ inputs.version }}" `
             -DKEEPASSXC_BUILD_TYPE=Release `
             "-DGIT_HEAD_OVERRIDE=$($env:GITHUB_SHA.Substring(0,7))" `
@@ -248,7 +249,8 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_UPSTREAM_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DWITH_TESTS=OFF \
             -DWITH_GUI_TESTS=OFF \
-            -DWITH_XC_DOCS=OFF \
+            -DKPXC_FEATURE_DOCS=OFF \
+            -DWITH_BUILD_QT=ON \
             -DOVERRIDE_VERSION="${{ inputs.version }}" \
             -DKEEPASSXC_BUILD_TYPE=Release \
             "-DGIT_HEAD_OVERRIDE=${GITHUB_SHA:0:7}" \
@@ -281,7 +283,7 @@ jobs:
   build-linux:
     name: Linux (tarball + GPG optionnel)
     needs: validate-signing
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -295,8 +297,9 @@ jobs:
             dpkg-dev \
             libbotan-2-dev libargon2-dev libminizip-dev zlib1g-dev \
             libqrencode-dev libreadline-dev libkeyutils-dev \
-            qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools libqt5svg5-dev \
-            libqt5x11extras5-dev libxi-dev libxtst-dev libssl-dev \
+            qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools qt6-base-dev-tools \
+            qt6-svg-dev qt6-5compat-dev qt6-l10n-tools qtkeychain-qt6-dev \
+            libxi-dev libxtst-dev libssl-dev \
             libpcsclite-dev libusb-1.0-0-dev
 
       - name: Configure and build
@@ -306,7 +309,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DWITH_TESTS=OFF \
             -DWITH_GUI_TESTS=OFF \
-            -DWITH_XC_DOCS=OFF \
+            -DKPXC_FEATURE_DOCS=OFF \
             -DOVERRIDE_VERSION="${{ inputs.version }}" \
             -DKEEPASSXC_BUILD_TYPE=Release \
             "-DGIT_HEAD_OVERRIDE=${GITHUB_SHA:0:7}"

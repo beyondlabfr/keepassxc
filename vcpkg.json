@@ -47,7 +47,8 @@
           "name": "qttools",
           "features": ["linguist", "qml"]
         },
-        "qttranslations"
+        "qttranslations",
+        "qtkeychain-qt6"
       ]
     }
   }
