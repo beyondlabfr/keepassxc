@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2026 KeePassXC Team <team@keepassxc.org>
  *  Copyright (C) 2019 Aetf <aetf@unlimitedcodeworks.xyz>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -24,11 +25,12 @@
 #include "fdosecrets/objects/Session.h"
 
 #include "core/EntryAttributes.h"
+#include "core/EntryPlaceholders.h"
 #include "core/Group.h"
 
 #include <QMimeDatabase>
 #include <QSet>
-#include <QTextCodec>
+#include <QStringDecoder>
 
 namespace FdoSecrets
 {
@@ -110,7 +112,7 @@ namespace FdoSecrets
 
             auto value = entryAttrs->value(attr);
             if (entryAttrs->isReference(attr)) {
-                value = m_backend->maskPasswordPlaceholders(value);
+                value = EntryPlaceholders::maskPasswordPlaceholders(value);
                 value = m_backend->resolveMultiplePlaceholders(value);
             }
             attrs[attr] = value;
@@ -119,6 +121,9 @@ namespace FdoSecrets
         // add custom attributes
         const auto customKeys = entryAttrs->customKeys();
         for (const auto& attr : customKeys) {
+            if (entryAttrs->isProtected(attr)) {
+                continue;
+            }
             attrs[attr] = entryAttrs->value(attr);
         }
 
@@ -154,7 +159,7 @@ namespace FdoSecrets
                 return QDBusError::InvalidArgs;
             }
 
-            if (EntryAttributes::matchReference(it.value()).hasMatch()) {
+            if (EntryPlaceholders::matchReference(it.value()).hasMatch()) {
                 return QDBusError::InvalidArgs;
             }
 
@@ -193,7 +198,7 @@ namespace FdoSecrets
             return ret;
         }
 
-        if (EntryAttributes::matchReference(label).hasMatch()) {
+        if (EntryPlaceholders::matchReference(label).hasMatch()) {
             return QDBusError::InvalidArgs;
         }
 
@@ -304,7 +309,7 @@ namespace FdoSecrets
         auto decoded = secret.session->decode(secret);
 
         // block references
-        if (EntryAttributes::matchReference(decoded.value).hasMatch()) {
+        if (EntryPlaceholders::matchReference(decoded.value).hasMatch()) {
             return QDBusError::InvalidArgs;
         }
 
@@ -400,7 +405,7 @@ namespace FdoSecrets
         Q_ASSERT(group);
 
         // root group is represented by a single slash, thus adding an empty component.
-        pathComponents.prepend(QLatin1Literal(""));
+        pathComponents.prepend("");
 
         return pathComponents.join('/');
     }
@@ -414,17 +419,19 @@ namespace FdoSecrets
         auto mimeType = db.mimeTypeForName(mimeName);
 
         // find a suitable codec
-        QTextCodec* codec = nullptr;
+        QStringDecoder decoder(QStringDecoder::Utf8);
         static const QRegularExpression charsetPattern(QStringLiteral(R"re(charset=(?<encode>.+)$)re"));
         auto match = charsetPattern.match(contentType);
         if (match.hasMatch()) {
-            codec = QTextCodec::codecForName(match.captured(QStringLiteral("encode")).toLatin1());
-        } else {
-            codec = QTextCodec::codecForName(QByteArrayLiteral("utf-8"));
+            auto codecName = match.captured(QStringLiteral("encode")).toUtf8();
+            auto encoding = QStringDecoder::encodingForName(codecName);
+            if (encoding != std::nullopt) {
+                decoder = QStringDecoder(encoding.value());
+            }
         }
 
-        if (!mimeType.isValid() || !mimeType.inherits(QStringLiteral("text/plain")) || !codec) {
-            if (EntryAttributes::matchReference(contentType).hasMatch()) {
+        if (!mimeType.isValid() || !mimeType.inherits(QStringLiteral("text/plain"))) {
+            if (EntryPlaceholders::matchReference(contentType).hasMatch()) {
                 return QDBusError::InvalidArgs;
             }
             // we can't handle this content type, save the data as attachment, and clear the password field
@@ -432,8 +439,8 @@ namespace FdoSecrets
             entry->attachments()->set(FDO_SECRETS_DATA, data);
             entry->attributes()->set(FDO_SECRETS_CONTENT_TYPE, contentType);
         } else {
-            auto password = codec->toUnicode(data);
-            if (EntryAttributes::matchReference(password).hasMatch()) {
+            auto password = decoder.decode(data);
+            if (EntryPlaceholders::matchReference(password).hasMatch()) {
                 return QDBusError::InvalidArgs;
             }
             // save the data to password field

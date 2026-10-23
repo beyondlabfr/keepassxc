@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2024 KeePassXC Team <team@keepassxc.org>
+ *  Copyright (C) 2026 KeePassXC Team <team@keepassxc.org>
  *  Copyright (C) 2010 Felix Geyer <debfx@fobos.de>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -32,10 +32,12 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QWindow>
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
 #include <QUrl>
 #include "core/remote/WebDavClient.h"
 #endif
+
+#include <algorithm>
 
 #include "config-keepassx.h"
 
@@ -54,30 +56,25 @@
 #include "gui/entry/EntryView.h"
 #include "gui/osutils/OSUtils.h"
 #include "gui/remote/RemoteSettings.h"
+#include "keeshare/KeeShare.h"
+#include "keeshare/SettingsPageKeeShare.h"
+#include "keys/drivers/YubiKey.h"
 
-#ifdef WITH_XC_UPDATECHECK
+#ifdef KPXC_FEATURE_UPDATES
 #include "gui/UpdateCheckDialog.h"
 #include "networking/UpdateChecker.h"
 #endif
 
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
 #include "sshagent/AgentSettingsPage.h"
 #include "sshagent/SSHAgent.h"
 #endif
-#ifdef WITH_XC_KEESHARE
-#include "keeshare/KeeShare.h"
-#include "keeshare/SettingsPageKeeShare.h"
-#endif
 
-#ifdef WITH_XC_FDOSECRETS
+#ifdef KPXC_FEATURE_FDOSECRETS
 #include "fdosecrets/FdoSecretsPlugin.h"
 #endif
 
-#ifdef WITH_XC_YUBIKEY
-#include "keys/drivers/YubiKey.h"
-#endif
-
-#ifdef WITH_XC_BROWSER
+#ifdef KPXC_FEATURE_BROWSER
 #include "browser/BrowserService.h"
 #endif
 
@@ -162,7 +159,7 @@ MainWindow::MainWindow()
     m_entryContextMenu->addSeparator();
     m_entryContextMenu->addAction(m_ui->actionEntryAutoType);
     m_entryContextMenu->addSeparator();
-#ifdef WITH_XC_BROWSER_PASSKEYS
+#ifdef KPXC_FEATURE_BROWSER
     m_entryContextMenu->addAction(m_ui->actionEntryImportPasskey);
     m_entryContextMenu->addAction(m_ui->actionEntryRemovePasskey);
     m_entryContextMenu->addSeparator();
@@ -226,12 +223,12 @@ MainWindow::MainWindow()
 
     m_ui->settingsWidget->addSettingsPage(new ShortcutSettingsPage());
 
-#ifdef WITH_XC_BROWSER
+#ifdef KPXC_FEATURE_BROWSER
     connect(
         browserService(), &BrowserService::requestUnlock, m_ui->tabWidget, &DatabaseTabWidget::performBrowserUnlock);
 #endif
 
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
     connect(sshAgent(), SIGNAL(error(QString)), this, SLOT(showErrorMessage(QString)));
     connect(sshAgent(), SIGNAL(enabledChanged(bool)), this, SLOT(agentEnabled(bool)));
     connect(m_ui->actionClearSSHAgent, SIGNAL(triggered()), SLOT(clearSSHAgent()));
@@ -240,15 +237,13 @@ MainWindow::MainWindow()
     agentEnabled(false);
 #endif
 
-#if defined(WITH_XC_KEESHARE)
     KeeShare::init(this);
     m_ui->settingsWidget->addSettingsPage(new SettingsPageKeeShare(m_ui->tabWidget));
     connect(KeeShare::instance(),
             SIGNAL(sharingMessage(QString, MessageWidget::MessageType)),
             SLOT(displayGlobalMessage(QString, MessageWidget::MessageType)));
-#endif
 
-#ifdef WITH_XC_FDOSECRETS
+#ifdef KPXC_FEATURE_FDOSECRETS
     auto fdoSS = new FdoSecretsPlugin(m_ui->tabWidget);
     connect(fdoSS, &FdoSecretsPlugin::error, this, &MainWindow::showErrorMessage);
     connect(fdoSS, &FdoSecretsPlugin::requestSwitchToDatabases, this, &MainWindow::switchToDatabases);
@@ -257,10 +252,8 @@ MainWindow::MainWindow()
     m_ui->settingsWidget->addSettingsPage(fdoSS);
 #endif
 
-#ifdef WITH_XC_YUBIKEY
     connect(YubiKey::instance(), SIGNAL(userInteractionRequest()), SLOT(showYubiKeyPopup()), Qt::QueuedConnection);
     connect(YubiKey::instance(), SIGNAL(challengeCompleted()), SLOT(hideYubiKeyPopup()), Qt::QueuedConnection);
-#endif
 
     setWindowIcon(icons()->applicationIcon());
     m_ui->globalMessageWidget->hideMessage();
@@ -299,29 +292,6 @@ MainWindow::MainWindow()
     connect(m_inactivityTimer, SIGNAL(inactivityDetected()), this, SLOT(lockAllDatabases()));
     applySettingsChanges();
 
-    // Qt 5.10 introduced a new "feature" to hide shortcuts in context menus
-    // Unfortunately, Qt::AA_DontShowShortcutsInContextMenus is broken, have to manually enable them
-    m_ui->actionEntryNew->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryEdit->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryExpire->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryDelete->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryRestore->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryClone->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryTotp->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryDownloadIcon->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryCopyTotp->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryCopyPasswordTotp->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryMoveUp->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryMoveDown->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryCopyUsername->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryCopyPassword->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryAutoTypeSequence->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryOpenUrl->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryCopyURL->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryCopyTitle->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryAddToAgent->setShortcutVisibleInContextMenu(true);
-    m_ui->actionEntryRemoveFromAgent->setShortcutVisibleInContextMenu(true);
-
     connect(m_ui->menuEntries, SIGNAL(aboutToShow()), SLOT(obtainContextFocusLock()));
     connect(m_ui->menuEntries, SIGNAL(aboutToHide()), SLOT(releaseContextFocusLock()));
     connect(m_entryContextMenu, SIGNAL(aboutToShow()), SLOT(obtainContextFocusLock()));
@@ -332,18 +302,18 @@ MainWindow::MainWindow()
     connect(m_ui->menuGroups, SIGNAL(aboutToHide()), SLOT(releaseContextFocusLock()));
 
     // Control window state
-    new QShortcut(Qt::CTRL + Qt::Key_M, this, SLOT(minimizeOrHide()));
-    new QShortcut(Qt::CTRL + Qt::SHIFT + Qt::Key_M, this, SLOT(hideWindow()));
+    new QShortcut(Qt::CTRL | Qt::Key_M, this, SLOT(minimizeOrHide()));
+    new QShortcut(Qt::CTRL | Qt::SHIFT | Qt::Key_M, this, SLOT(hideWindow()));
     // Control database tabs
     // Ctrl+Tab is broken on Mac, so use Alt (i.e. the Option key) - https://bugreports.qt.io/browse/QTBUG-8596
     auto dbTabModifier2 = Qt::CTRL;
 #ifdef Q_OS_MACOS
     dbTabModifier2 = Qt::ALT;
 #endif
-    new QShortcut(dbTabModifier2 + Qt::Key_Tab, this, SLOT(selectNextDatabaseTab()));
-    new QShortcut(Qt::CTRL + Qt::Key_PageDown, this, SLOT(selectNextDatabaseTab()));
-    new QShortcut(dbTabModifier2 + Qt::SHIFT + Qt::Key_Tab, this, SLOT(selectPreviousDatabaseTab()));
-    new QShortcut(Qt::CTRL + Qt::Key_PageUp, this, SLOT(selectPreviousDatabaseTab()));
+    new QShortcut(dbTabModifier2 | Qt::Key_Tab, this, SLOT(selectNextDatabaseTab()));
+    new QShortcut(Qt::CTRL | Qt::Key_PageDown, this, SLOT(selectNextDatabaseTab()));
+    new QShortcut(dbTabModifier2 | Qt::SHIFT | Qt::Key_Tab, this, SLOT(selectPreviousDatabaseTab()));
+    new QShortcut(Qt::CTRL | Qt::Key_PageUp, this, SLOT(selectPreviousDatabaseTab()));
 
     // Tab selection by number, Windows uses Ctrl, macOS uses Command,
     // and Linux uses Alt to emulate a browser-like experience
@@ -351,28 +321,28 @@ MainWindow::MainWindow()
 #ifdef Q_OS_LINUX
     dbTabModifier = Qt::ALT;
 #endif
-    auto shortcut = new QShortcut(dbTabModifier + Qt::Key_1, this);
+    auto shortcut = new QShortcut(dbTabModifier | Qt::Key_1, this);
     connect(shortcut, &QShortcut::activated, [this]() { selectDatabaseTab(0); });
-    shortcut = new QShortcut(dbTabModifier + Qt::Key_2, this);
+    shortcut = new QShortcut(dbTabModifier | Qt::Key_2, this);
     connect(shortcut, &QShortcut::activated, [this]() { selectDatabaseTab(1); });
-    shortcut = new QShortcut(dbTabModifier + Qt::Key_3, this);
+    shortcut = new QShortcut(dbTabModifier | Qt::Key_3, this);
     connect(shortcut, &QShortcut::activated, [this]() { selectDatabaseTab(2); });
-    shortcut = new QShortcut(dbTabModifier + Qt::Key_4, this);
+    shortcut = new QShortcut(dbTabModifier | Qt::Key_4, this);
     connect(shortcut, &QShortcut::activated, [this]() { selectDatabaseTab(3); });
-    shortcut = new QShortcut(dbTabModifier + Qt::Key_5, this);
+    shortcut = new QShortcut(dbTabModifier | Qt::Key_5, this);
     connect(shortcut, &QShortcut::activated, [this]() { selectDatabaseTab(4); });
-    shortcut = new QShortcut(dbTabModifier + Qt::Key_6, this);
+    shortcut = new QShortcut(dbTabModifier | Qt::Key_6, this);
     connect(shortcut, &QShortcut::activated, [this]() { selectDatabaseTab(5); });
-    shortcut = new QShortcut(dbTabModifier + Qt::Key_7, this);
+    shortcut = new QShortcut(dbTabModifier | Qt::Key_7, this);
     connect(shortcut, &QShortcut::activated, [this]() { selectDatabaseTab(6); });
-    shortcut = new QShortcut(dbTabModifier + Qt::Key_8, this);
+    shortcut = new QShortcut(dbTabModifier | Qt::Key_8, this);
     connect(shortcut, &QShortcut::activated, [this]() { selectDatabaseTab(7); });
-    shortcut = new QShortcut(dbTabModifier + Qt::Key_9, this);
+    shortcut = new QShortcut(dbTabModifier | Qt::Key_9, this);
     connect(shortcut, &QShortcut::activated, [this]() { selectDatabaseTab(m_ui->tabWidget->count() - 1); });
 
     m_ui->actionDatabaseNew->setIcon(icons()->icon("document-new"));
     m_ui->actionDatabaseOpen->setIcon(icons()->icon("document-open"));
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     m_ui->actionDatabaseOpenWebDav->setIcon(icons()->icon("remote-sync"));
 #endif
     m_ui->menuRecentDatabases->setIcon(icons()->icon("document-open-recent"));
@@ -394,7 +364,7 @@ MainWindow::MainWindow()
     m_ui->actionImport->setIcon(icons()->icon("document-import"));
     m_ui->menuExport->setIcon(icons()->icon("document-export"));
 
-#ifndef WITH_XC_BROWSER_PASSKEYS
+#ifndef KPXC_FEATURE_BROWSER
     m_ui->actionPasskeys->setVisible(false);
     m_ui->actionImportPasskey->setVisible(false);
     m_ui->actionEntryImportPasskey->setVisible(false);
@@ -456,7 +426,7 @@ MainWindow::MainWindow()
     m_ui->actionKeyboardShortcuts->setIcon(icons()->icon("keyboard-shortcuts"));
     m_ui->actionCheckForUpdates->setIcon(icons()->icon("system-software-update"));
 
-#ifdef WITH_XC_BROWSER_PASSKEYS
+#ifdef KPXC_FEATURE_BROWSER
     m_ui->actionPasskeys->setIcon(icons()->icon("passkey"));
     m_ui->actionImportPasskey->setIcon(icons()->icon("document-import"));
     m_ui->actionEntryImportPasskey->setIcon(icons()->icon("document-import"));
@@ -499,7 +469,7 @@ MainWindow::MainWindow()
 
     connect(m_ui->actionDatabaseNew, SIGNAL(triggered()), m_ui->tabWidget, SLOT(newDatabase()));
     connect(m_ui->actionDatabaseOpen, SIGNAL(triggered()), m_ui->tabWidget, SLOT(openDatabase()));
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     connect(m_ui->actionDatabaseOpenWebDav, SIGNAL(triggered()), m_ui->tabWidget, SLOT(openWebDavDatabase()));
 #else
     m_ui->actionDatabaseOpenWebDav->setVisible(false);
@@ -512,7 +482,7 @@ MainWindow::MainWindow()
     connect(m_ui->actionDatabaseSettings, SIGNAL(toggled(bool)), m_ui->tabWidget, SLOT(showDatabaseSettings(bool)));
     connect(m_ui->actionDatabaseSecurity, SIGNAL(triggered()), m_ui->tabWidget, SLOT(showDatabaseSecurity()));
     connect(m_ui->actionReports, SIGNAL(toggled(bool)), m_ui->tabWidget, SLOT(showDatabaseReports(bool)));
-#ifdef WITH_XC_BROWSER_PASSKEYS
+#ifdef KPXC_FEATURE_BROWSER
     connect(m_ui->actionPasskeys, SIGNAL(triggered()), m_ui->tabWidget, SLOT(showPasskeys()));
     connect(m_ui->actionImportPasskey, SIGNAL(triggered()), m_ui->tabWidget, SLOT(importPasskey()));
     connect(m_ui->actionEntryImportPasskey, SIGNAL(triggered()), m_ui->tabWidget, SLOT(importPasskeyToEntry()));
@@ -564,7 +534,7 @@ MainWindow::MainWindow()
         m_ui->actionEntryAutoTypeURLEnter, SIGNAL(triggered()), SLOT(performAutoTypeURLEnter()));
     m_actionMultiplexer.connect(m_ui->actionEntryOpenUrl, SIGNAL(triggered()), SLOT(openUrl()));
     m_actionMultiplexer.connect(m_ui->actionEntryDownloadIcon, SIGNAL(triggered()), SLOT(downloadSelectedFavicons()));
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
     m_actionMultiplexer.connect(m_ui->actionEntryAddToAgent, SIGNAL(triggered()), SLOT(addToAgent()));
     m_actionMultiplexer.connect(m_ui->actionEntryRemoveFromAgent, SIGNAL(triggered()), SLOT(removeFromAgent()));
 #endif
@@ -613,7 +583,7 @@ MainWindow::MainWindow()
     setUnifiedTitleAndToolBarOnMac(true);
 #endif
 
-#ifdef WITH_XC_UPDATECHECK
+#ifdef KPXC_FEATURE_UPDATES
     connect(m_ui->actionCheckForUpdates, SIGNAL(triggered()), SLOT(showUpdateCheckDialog()));
     connect(UpdateChecker::instance(),
             SIGNAL(updateCheckFinished(bool, QString, bool)),
@@ -627,11 +597,11 @@ MainWindow::MainWindow()
     m_ui->actionCheckForUpdates->setVisible(false);
 #endif
 
-#ifndef WITH_XC_NETWORKING
+#ifndef KPXC_FEATURE_NETWORK
     m_ui->actionGroupDownloadFavicons->setVisible(false);
     m_ui->actionEntryDownloadIcon->setVisible(false);
 #endif
-#ifndef WITH_XC_DOCS
+#ifndef KPXC_FEATURE_DOCS
     m_ui->actionGettingStarted->setVisible(false);
     m_ui->actionUserGuide->setVisible(false);
     m_ui->actionKeyboardShortcuts->setVisible(false);
@@ -663,7 +633,7 @@ MainWindow::MainWindow()
     // Properly shutdown on logoff, restart, and shutdown
     connect(qApp, &QGuiApplication::commitDataRequest, this, [this] { m_appExitCalled = true; });
 
-#if defined(KEEPASSXC_BUILD_TYPE_SNAPSHOT) || defined(KEEPASSXC_BUILD_TYPE_PRE_RELEASE)
+#ifdef KEEPASSXC_BUILD_TYPE_SNAPSHOT
     auto* hidePreRelWarn = new QAction(tr("Don't show again for this version"), m_ui->globalMessageWidget);
     m_ui->globalMessageWidget->addAction(hidePreRelWarn);
     auto hidePreRelWarnConn = QSharedPointer<QMetaObject::Connection>::create();
@@ -677,23 +647,13 @@ MainWindow::MainWindow()
         m_ui->globalMessageWidget->animatedHide();
         config()->set(Config::Messages_HidePreReleaseWarning, KEEPASSXC_VERSION);
     });
-#endif
-#if defined(KEEPASSXC_BUILD_TYPE_SNAPSHOT)
+
     if (config()->get(Config::Messages_HidePreReleaseWarning) != KEEPASSXC_VERSION) {
-        m_ui->globalMessageWidget->showMessage(
-            tr("WARNING: You are using an unstable build of KeePassXC.\n"
-               "There is a high risk of corruption, maintain a backup of your databases.\n"
-               "This version is not meant for production use."),
-            MessageWidget::Warning,
-            -1);
-    }
-#elif defined(KEEPASSXC_BUILD_TYPE_PRE_RELEASE)
-    if (config()->get(Config::Messages_HidePreReleaseWarning) != KEEPASSXC_VERSION) {
-        m_ui->globalMessageWidget->showMessage(
-            tr("NOTE: You are using a pre-release version of KeePassXC.\n"
-               "Expect some bugs and minor issues, this version is meant for testing purposes."),
-            MessageWidget::Information,
-            -1);
+        m_ui->globalMessageWidget->showMessage(tr("WARNING: You are using a development snapshot build of KeePassXC.\n"
+                                                  "Maintain a backup of your databases in the event of unknown bugs.\n"
+                                                  "This version is not meant for production use."),
+                                               MessageWidget::Warning,
+                                               -1);
     }
 #endif
 
@@ -729,7 +689,7 @@ MainWindow::MainWindow()
 
 MainWindow::~MainWindow()
 {
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
     sshAgent()->removeAllIdentities();
 #endif
 }
@@ -745,7 +705,7 @@ void MainWindow::restoreConfigState()
             if (filename.isEmpty()) {
                 continue;
             }
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
             const QUrl urlCandidate(filename);
             if (urlCandidate.isValid() && WebDavClient::isWebDavScheme(urlCandidate.scheme())) {
                 openDatabase(filename);
@@ -791,11 +751,7 @@ void MainWindow::appExit()
  */
 bool MainWindow::isHardwareKeySupported()
 {
-#ifdef WITH_XC_YUBIKEY
     return true;
-#else
-    return false;
-#endif
 }
 
 /**
@@ -807,7 +763,6 @@ bool MainWindow::isHardwareKeySupported()
  */
 bool MainWindow::refreshHardwareKeys()
 {
-#ifdef WITH_XC_YUBIKEY
     auto yk = YubiKey::instance();
     // find keys sync to allow returning if any key was found
     bool found = yk->findValidKeys();
@@ -815,9 +770,6 @@ bool MainWindow::refreshHardwareKeys()
     // emit here manually because sync findValidKeys() cannot do that properly
     emit yk->detectComplete(found);
     return found;
-#else
-    return false;
-#endif
 }
 
 void MainWindow::updateLastDatabasesMenu()
@@ -860,15 +812,6 @@ void MainWindow::updateCopyAttributesMenu()
 
 void MainWindow::updateSetTagsMenu()
 {
-    auto actionForTag = [](const QMenu* menu, const QString& tag) -> QAction* {
-        for (const auto action : menu->actions()) {
-            if (action->text() == tag) {
-                return action;
-            }
-        }
-        return nullptr;
-    };
-
     m_ui->menuTags->setTearOffEnabled(true);
 
     auto dbWidget = m_ui->tabWidget->currentDatabaseWidget();
@@ -891,8 +834,12 @@ void MainWindow::updateSetTagsMenu()
 
         // Add known database tags as actions and set checked if
         // a selected entry has that tag
+        QList<QAction*> actionList = m_ui->menuTags->actions();
         for (const auto& tag : tagList) {
-            auto action = actionForTag(m_ui->menuTags, tag);
+            auto actionForTag = std::find_if(actionList.cbegin(),
+                                             actionList.cend(),
+                                             [&tag](const QAction* action) -> bool { return action->text() == tag; });
+            QAction* action = actionForTag == actionList.cend() ? nullptr : *actionForTag;
             if (!action) {
                 action = m_ui->menuTags->addAction(icons()->icon("tag"), tag);
                 action->setCheckable(true);
@@ -1047,13 +994,13 @@ void MainWindow::updateMenuActionState()
     m_ui->actionEntryTotpQRCode->setEnabled(singleEntrySelected && dbWidget->currentEntryHasTotp());
     m_ui->actionEntryDownloadIcon->setEnabled((multiEntrySelected && !singleEntrySelected)
                                               || (singleEntrySelected && dbWidget->currentEntryHasUrl()));
-#ifdef WITH_XC_BROWSER_PASSKEYS
+#ifdef KPXC_FEATURE_BROWSER
     m_ui->actionEntryImportPasskey->setVisible(singleEntrySelected);
     m_ui->actionEntryImportPasskey->setEnabled(singleEntrySelected);
     m_ui->actionEntryRemovePasskey->setVisible(singleEntrySelected && dbWidget->currentEntryHasPasskey());
     m_ui->actionEntryRemovePasskey->setEnabled(singleEntrySelected && dbWidget->currentEntryHasPasskey());
 #endif
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
     bool hasSSHKey = singleEntrySelected && sshAgent()->isEnabled() && dbWidget->currentEntryHasSshKey();
     m_ui->actionEntryAddToAgent->setVisible(hasSSHKey);
     m_ui->actionEntryAddToAgent->setEnabled(hasSSHKey);
@@ -1073,7 +1020,7 @@ void MainWindow::updateMenuActionState()
     m_ui->actionGroupSortDesc->setEnabled(groupHasChildren);
     m_ui->actionGroupEmptyRecycleBin->setVisible(inRecycleBin);
     m_ui->actionGroupEmptyRecycleBin->setEnabled(inRecycleBin);
-#ifdef WITH_XC_NETWORKING
+#ifdef KPXC_FEATURE_NETWORK
     m_ui->actionGroupDownloadFavicons->setVisible(!inRecycleBin);
 #endif
     m_ui->actionGroupDownloadFavicons->setEnabled(groupSelected && groupHasEntries && !inRecycleBin);
@@ -1092,7 +1039,7 @@ void MainWindow::updateMenuActionState()
     m_ui->menuRemoteSync->setEnabled(inDatabase || inDatabaseSettings);
     m_ui->menuExport->setEnabled(inDatabase);
     m_ui->actionDatabaseMerge->setEnabled(inDatabase);
-#ifdef WITH_XC_BROWSER_PASSKEYS
+#ifdef KPXC_FEATURE_BROWSER
     m_ui->actionPasskeys->setEnabled(inDatabase || inReports);
     m_ui->actionImportPasskey->setEnabled(inDatabase);
 #endif
@@ -1167,7 +1114,7 @@ void MainWindow::showAboutDialog()
 
 void MainWindow::performUpdateCheck()
 {
-#ifdef WITH_XC_UPDATECHECK
+#ifdef KPXC_FEATURE_UPDATES
     if (!config()->get(Config::UpdateCheckMessageShown).toBool()) {
         auto result =
             MessageBox::question(this,
@@ -1190,7 +1137,7 @@ void MainWindow::performUpdateCheck()
 
 void MainWindow::hasUpdateAvailable(bool hasUpdate, const QString& version, bool isManuallyRequested)
 {
-#ifdef WITH_XC_UPDATECHECK
+#ifdef KPXC_FEATURE_UPDATES
     if (hasUpdate && !isManuallyRequested) {
         auto* updateCheckDialog = new UpdateCheckDialog(this);
         updateCheckDialog->showUpdateCheckResponse(hasUpdate, version);
@@ -1205,7 +1152,7 @@ void MainWindow::hasUpdateAvailable(bool hasUpdate, const QString& version, bool
 
 void MainWindow::showUpdateCheckDialog()
 {
-#ifdef WITH_XC_UPDATECHECK
+#ifdef KPXC_FEATURE_UPDATES
     updateCheck()->checkForUpdates(true);
     auto* updateCheckDialog = new UpdateCheckDialog(this);
     updateCheckDialog->show();
@@ -1570,7 +1517,7 @@ void MainWindow::disableMenuAndToolbar()
 
 void MainWindow::clearSSHAgent()
 {
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
     auto agent = SSHAgent::instance();
     auto ret = agent->clearAllAgentIdentities();
     displayGlobalMessage(agent->errorString(), ret ? MessageWidget::Positive : KMessageWidget::Error, false);
@@ -1613,7 +1560,7 @@ bool MainWindow::saveLastDatabases()
             auto dbWidget = m_ui->tabWidget->databaseWidgetFromIndex(i);
             if (!dbWidget->database()->isTemporaryDatabase()) {
                 QString path = dbWidget->database()->filePath();
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
                 if (!dbWidget->database()->hasRemoteFile()) {
                     path = QDir::toNativeSeparators(path);
                 }
@@ -1915,6 +1862,7 @@ void MainWindow::hideWindow()
         if (QGuiApplication::platformName() != "xcb" && QGuiApplication::platformName() != "cocoa") {
             setWindowState(windowState() | Qt::WindowMinimized);
         }
+        m_minimizedToSystemTray = true;
         hide();
     } else {
         showMinimized();
@@ -1994,11 +1942,17 @@ void MainWindow::hideYubiKeyPopup()
 
 void MainWindow::bringToFront()
 {
+    m_minimizedToSystemTray = false;
     ensurePolished();
     setWindowState((windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
     show();
     raise();
     activateWindow();
+}
+
+bool MainWindow::isMinimizedToSystemTray()
+{
+    return m_minimizedToSystemTray;
 }
 
 void MainWindow::handleScreenLock()
@@ -2283,9 +2237,9 @@ void MainWindow::initActionCollection()
 
     // Prevent conflicts with global Mac shortcuts (force Control on all platforms)
     // Note: Qt::META means Ctrl on Mac.
-#ifdef Q_OS_MAC
-    ac->setDefaultShortcut(m_ui->actionEntryAddToAgent, Qt::META + Qt::Key_H);
-    ac->setDefaultShortcut(m_ui->actionEntryRemoveFromAgent, Qt::META + Qt::SHIFT + Qt::Key_H);
+#ifdef Q_OS_MACOS
+    ac->setDefaultShortcut(m_ui->actionEntryAddToAgent, Qt::META | Qt::Key_H);
+    ac->setDefaultShortcut(m_ui->actionEntryRemoveFromAgent, Qt::META | Qt::SHIFT | Qt::Key_H);
 #endif
 
     QTimer::singleShot(1, ac, &ActionCollection::restoreShortcuts);
@@ -2330,8 +2284,6 @@ bool MainWindowEventFilter::eventFilter(QObject* watched, QEvent* event)
 
     auto eventType = event->type();
     if (eventType == QEvent::MouseButtonPress) {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-        // startSystemMove was introduced in Qt 5.15
         auto mouseEvent = dynamic_cast<QMouseEvent*>(event);
         if (watched == mainWindow->m_ui->menubar) {
             if (!mainWindow->m_ui->menubar->actionAt(mouseEvent->pos())) {
@@ -2355,7 +2307,6 @@ bool MainWindowEventFilter::eventFilter(QObject* watched, QEvent* event)
                 return true;
             }
         }
-#endif
     } else if (eventType == QEvent::KeyRelease && watched == mainWindow) {
 #ifdef Q_OS_MACOS
         // On macOS, the menubar is always visible, so no need to toggle it

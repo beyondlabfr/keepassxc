@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2025 KeePassXC Team <team@keepassxc.org>
  *  Copyright (C) 2012 Felix Geyer <debfx@fobos.de>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -19,7 +20,8 @@
 
 #include <QFile>
 #include <QFileInfo>
-#include <QTextCodec>
+#include <QRegularExpression>
+#include <QStringConverter>
 
 #include "core/Endian.h"
 #include "core/Group.h"
@@ -193,7 +195,8 @@ KeePass1Reader::readDatabase(QIODevice* device, const QString& password, QIODevi
     for (Entry* entry : asConst(entries)) {
         if (isMetaStream(entry)) {
             parseMetaStream(entry);
-
+            m_entryUuids.remove(m_entryUuids.key(entry));
+            m_entryGroupIds.remove(entry);
             delete entry;
         } else {
             quint32 groupId = m_entryGroupIds.value(entry);
@@ -300,8 +303,10 @@ KeePass1Reader::testKeys(const QString& password, const QByteArray& keyfileData,
 
     QScopedPointer<SymmetricCipherStream> cipherStream;
     QByteArray passwordData;
-    QTextCodec* codec = QTextCodec::codecForName("Windows-1252");
-    QByteArray passwordDataCorrect = codec->fromUnicode(password);
+
+    const auto currentEncoding = QStringConverter::encodingForName("Windows-1252");
+    QStringEncoder encoder(currentEncoding.value_or(QStringConverter::System));
+    QByteArray passwordDataCorrect = encoder.encode(password);
 
     for (PasswordEncoding encoding : encodings) {
         if (encoding == Windows1252) {
@@ -495,6 +500,7 @@ Group* KeePass1Reader::readGroup(QIODevice* cipherStream)
         case 0x0005: {
             if (fieldSize != 5) {
                 raiseError(tr("Incorrect group access time field size"));
+                return nullptr;
             }
             QDateTime dateTime = dateFromPackedStruct(fieldData);
             if (dateTime.isValid()) {
@@ -505,6 +511,7 @@ Group* KeePass1Reader::readGroup(QIODevice* cipherStream)
         case 0x0006: {
             if (fieldSize != 5) {
                 raiseError(tr("Incorrect group expiry time field size"));
+                return nullptr;
             }
             QDateTime dateTime = dateFromPackedStruct(fieldData);
             if (dateTime.isValid()) {
@@ -701,8 +708,8 @@ Entry* KeePass1Reader::readEntry(QIODevice* cipherStream)
 
 void KeePass1Reader::parseNotes(const QString& rawNotes, Entry* entry)
 {
-    QRegExp sequenceRegexp("Auto-Type(?:-(\\d+))?: (.+)", Qt::CaseInsensitive, QRegExp::RegExp2);
-    QRegExp windowRegexp("Auto-Type-Window(?:-(\\d+))?: (.+)", Qt::CaseInsensitive, QRegExp::RegExp2);
+    QRegularExpression sequenceRegexp("Auto-Type(?:-(\\d+))?: (.+)", QRegularExpression::CaseInsensitiveOption);
+    QRegularExpression windowRegexp("Auto-Type-Window(?:-(\\d+))?: (.+)", QRegularExpression::CaseInsensitiveOption);
     QHash<int, QString> sequences;
     QMap<int, QStringList> windows;
 
@@ -713,23 +720,25 @@ void KeePass1Reader::parseNotes(const QString& rawNotes, Entry* entry)
     for (QString line : rawNotesLines) {
         line.remove("\r");
 
-        if (sequenceRegexp.exactMatch(line)) {
-            if (sequenceRegexp.cap(1).isEmpty()) {
-                entry->setDefaultAutoTypeSequence(sequenceRegexp.cap(2));
+        auto sequenceMatch = sequenceRegexp.match(line);
+        auto windowMatch = windowRegexp.match(line);
+        if (sequenceMatch.hasMatch()) {
+            if (sequenceMatch.captured(1).isEmpty()) {
+                entry->setDefaultAutoTypeSequence(sequenceMatch.captured(2));
             } else {
-                sequences[sequenceRegexp.cap(1).toInt()] = sequenceRegexp.cap(2);
+                sequences[sequenceMatch.captured(1).toInt()] = sequenceMatch.captured(2);
             }
 
             lastLineAutoType = true;
-        } else if (windowRegexp.exactMatch(line)) {
+        } else if (windowMatch.hasMatch()) {
             int nr;
-            if (windowRegexp.cap(1).isEmpty()) {
+            if (windowMatch.captured(1).isEmpty()) {
                 nr = -1; // special number that matches no other sequence
             } else {
-                nr = windowRegexp.cap(1).toInt();
+                nr = windowMatch.captured(1).toInt();
             }
 
-            windows[nr].append(windowRegexp.cap(2));
+            windows[nr].append(windowMatch.captured(2));
 
             lastLineAutoType = true;
         } else {
@@ -814,7 +823,8 @@ bool KeePass1Reader::parseGroupTreeState(const QByteArray& data)
     auto num = Endian::bytesToSizedInt<quint32>(data.mid(pos, 4), KeePass1::BYTEORDER);
     pos += 4;
 
-    if (static_cast<quint32>(data.size() - 4) != (num * 5)) {
+    constexpr quint64 recordSize = 5;
+    if (static_cast<quint64>(data.size()) - 4 != static_cast<quint64>(num) * recordSize) {
         return false;
     }
 

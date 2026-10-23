@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 KeePassXC Team <team@keepassxc.org>
+ *  Copyright (C) 2026 KeePassXC Team <team@keepassxc.org>
  *  Copyright (C) 2010 Felix Geyer <debfx@fobos.de>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -27,7 +27,7 @@
 #include "format/KeePass2Writer.h"
 #include "streams/HashingStream.h"
 
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
 #include "core/Config.h"
 #include "core/remote/WebDavClient.h"
 #endif
@@ -39,6 +39,8 @@
 #include <QSaveFile>
 #include <QTemporaryFile>
 #include <QTimer>
+
+#include <algorithm>
 
 #ifdef Q_OS_WIN
 #include <Windows.h>
@@ -67,9 +69,13 @@ Database::Database()
     connect(this, &Database::databaseOpened, this, [this]() {
         updateCommonUsernames();
         updateTagList();
+        updateCustomAttributeKeys();
     });
     connect(this, &Database::modified, this, [this] { updateTagList(); });
-    connect(this, &Database::databaseSaved, this, [this] { updateCommonUsernames(); });
+    connect(this, &Database::databaseSaved, this, [this] {
+        updateCommonUsernames();
+        updateCustomAttributeKeys();
+    });
     connect(m_fileWatcher, &FileWatcher::fileChanged, this, [this] { emit databaseFileChanged(false); });
 
     // static uuid map
@@ -130,7 +136,7 @@ bool Database::open(QSharedPointer<const CompositeKey> key, QString* error)
  */
 bool Database::open(const QString& filePath, QSharedPointer<const CompositeKey> key, QString* error)
 {
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     QUrl urlCandidate(filePath);
     if (hasRemoteFile()
         || (urlCandidate.isValid() && WebDavClient::isWebDavScheme(urlCandidate.scheme()))) {
@@ -203,7 +209,7 @@ bool Database::open(const QString& filePath, QSharedPointer<const CompositeKey> 
     return true;
 }
 
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
 
 /**
  * Last-resort lookup: if the in-memory RemoteFileConfig is missing credentials
@@ -318,7 +324,7 @@ bool Database::openFromWebDav(const QString& filePath,
 }
 #endif
 
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
 bool Database::saveToWebDav(const QString& filePath, SaveAction action, const QString& backupFilePath, QString* error)
 {
     Q_UNUSED(action);
@@ -497,7 +503,7 @@ bool Database::saveAs(const QString& filePath, SaveAction action, const QString&
         return false;
     }
 
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     QUrl urlCandidate(filePath);
     bool targetIsRemote = urlCandidate.isValid() && WebDavClient::isWebDavScheme(urlCandidate.scheme());
     if (targetIsRemote || (hasRemoteFile() && filePath == m_data.filePath)) {
@@ -563,7 +569,7 @@ bool Database::saveAs(const QString& filePath, SaveAction action, const QString&
 
 #ifdef Q_OS_WIN
         if (isHidden) {
-            SetFileAttributes(realFilePath.toStdString().c_str(), FILE_ATTRIBUTE_HIDDEN);
+            SetFileAttributes(realFilePath.toStdWString().c_str(), FILE_ATTRIBUTE_HIDDEN);
         }
 #endif
         m_ignoreFileChangesUntilSaved = false;
@@ -747,7 +753,9 @@ bool Database::import(const QString& xmlExportPath, QString* error)
 {
     KdbxXmlReader reader(KeePass2::FILE_VERSION_4);
     QFile file(xmlExportPath);
-    file.open(QIODevice::ReadOnly);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
 
     reader.readDatabase(&file, this);
 
@@ -798,6 +806,7 @@ void Database::releaseData()
     m_deletedObjects.clear();
     m_commonUsernames.clear();
     m_tagList.clear();
+    m_customAttributeKeys.clear();
 
     m_fileBlockHash.clear();
     m_ignoreFileChangesUntilSaved = false;
@@ -926,7 +935,7 @@ QString Database::filePath() const
  */
 QString Database::canonicalFilePath() const
 {
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     if (hasRemoteFile()) {
         return m_data.filePath;
     }
@@ -981,22 +990,14 @@ const QList<DeletedObject>& Database::deletedObjects() const
 
 bool Database::containsDeletedObject(const QUuid& uuid) const
 {
-    for (const DeletedObject& currentObject : m_deletedObjects) {
-        if (currentObject.uuid == uuid) {
-            return true;
-        }
-    }
-    return false;
+    return std::any_of(m_deletedObjects.cbegin(),
+                       m_deletedObjects.cend(),
+                       [&uuid](const DeletedObject& object) -> bool { return object.uuid == uuid; });
 }
 
 bool Database::containsDeletedObject(const DeletedObject& object) const
 {
-    for (const DeletedObject& currentObject : m_deletedObjects) {
-        if (currentObject.uuid == object.uuid) {
-            return true;
-        }
-    }
-    return false;
+    return containsDeletedObject(object.uuid);
 }
 
 void Database::setDeletedObjects(const QList<DeletedObject>& delObjs)
@@ -1027,6 +1028,11 @@ const QStringList& Database::commonUsernames() const
     return m_commonUsernames;
 }
 
+const QStringList& Database::customAttributeKeys() const
+{
+    return m_customAttributeKeys;
+}
+
 const QStringList& Database::tagList() const
 {
     return m_tagList;
@@ -1036,6 +1042,32 @@ void Database::updateCommonUsernames(int topN)
 {
     m_commonUsernames.clear();
     m_commonUsernames.append(rootGroup()->usernamesRecursive(topN));
+}
+
+void Database::updateCustomAttributeKeys()
+{
+    m_customAttributeKeys.clear();
+    if (!m_rootGroup) {
+        return;
+    }
+
+    // Search groups recursively looking for custom attribute keys
+    // Use a set to prevent adding duplicates
+    QSet<QString> customKeysSet;
+    for (auto entry : m_rootGroup->entriesRecursive()) {
+        if (!entry->isRecycled()) {
+            for (auto key : entry->attributes()->customKeys()) {
+                customKeysSet.insert(key);
+            }
+        }
+    }
+
+    m_customAttributeKeys = customKeysSet.values();
+
+    QCollator collator;
+    collator.setNumericMode(true);
+    collator.setCaseSensitivity(Qt::CaseInsensitive);
+    std::sort(m_customAttributeKeys.begin(), m_customAttributeKeys.end(), collator);
 }
 
 void Database::updateTagList()
@@ -1427,7 +1459,7 @@ void Database::setPublicIcon(int iconIndex)
 
 void Database::setRemoteFileConfig(const RemoteFileConfig& config)
 {
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     if (config.type == RemoteFileConfig::Type::WebDav && config.url.isValid()
         && WebDavClient::isWebDavScheme(config.url.scheme())) {
         RemoteFileConfig sanitized = config;
@@ -1451,7 +1483,7 @@ const Database::RemoteFileConfig& Database::remoteFileConfig() const
 
 bool Database::hasRemoteFile() const
 {
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     return m_data.remoteFile.type == RemoteFileConfig::Type::WebDav;
 #else
     return false;

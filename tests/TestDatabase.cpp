@@ -1,6 +1,6 @@
 /*
+ *  Copyright (C) 2025 KeePassXC Team <team@keepassxc.org>
  *  Copyright (C) 2017 Vladimir Svyatski <v.unreal@gmail.com>
- *  Copyright (C) 2017 KeePassXC Team <team@keepassxc.org>
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -42,6 +42,7 @@ static QString dbFileName = QStringLiteral(KEEPASSX_TEST_DATA_DIR).append("/NewD
 void TestDatabase::initTestCase()
 {
     QVERIFY(Crypto::init());
+    QLocale::setDefault(QLocale::c());
 }
 
 void TestDatabase::testOpen()
@@ -125,7 +126,7 @@ void TestDatabase::testSaveAs()
     QVERIFY(QFile::exists(newDbFileName));
 #ifdef Q_OS_WIN
     QVERIFY(!QFileInfo(newDbFileName).isHidden());
-    SetFileAttributes(newDbFileName.toStdString().c_str(), FILE_ATTRIBUTE_HIDDEN);
+    SetFileAttributes(newDbFileName.toStdWString().c_str(), FILE_ATTRIBUTE_HIDDEN);
     QVERIFY2(db->saveAs(newDbFileName, Database::Atomic, QString(), &error), error.toLatin1());
     QVERIFY(QFileInfo(newDbFileName).isHidden());
 #endif
@@ -305,4 +306,89 @@ void TestDatabase::testExternallyModified()
     QVERIFY(db->save(Database::Atomic, {}, &error));
     // ignoreFileChangesUntilSaved should reset after save
     QVERIFY(db->ignoreFileChangesUntilSaved() == false);
+}
+
+void TestDatabase::testCustomAttributeKeys()
+{
+    // Check for:
+    // - duplicate key
+    // - key of protected fields
+    // - recycled entry or group
+    // - unicode
+    // - sorting
+    Database db;
+    db.metadata()->setRecycleBinEnabled(true);
+    QVERIFY(db.metadata()->recycleBinEnabled());
+
+    auto root = db.rootGroup();
+    QVERIFY(root);
+
+    // Empty database
+    db.updateCustomAttributeKeys();
+    QCOMPARE(db.customAttributeKeys(), {});
+
+    // Custom attributes of an entry in the root group
+    auto entry1 = new Entry();
+    entry1->setGroup(root);
+    entry1->attributes()->set("Custom2", "value");
+    entry1->attributes()->set("DuplicateKey", "value");
+    entry1->attributes()->set("東京", "unicode1");
+
+    // Custom attributes of an entry in a nested group
+    auto group = new Group();
+    group->setName("Nested");
+    group->setParent(root);
+
+    auto entry2 = new Entry();
+    entry2->setGroup(group);
+    entry2->attributes()->set("ProtectedKey", "value", true);
+    entry2->attributes()->set("DuplicateKey", "value3");
+    entry2->attributes()->set("Custom1", "value");
+    entry2->attributes()->set("Naïve Café Österreich", "unicode2");
+    entry2->attributes()->set("😀Emoji", "unicode3");
+
+    auto entry3 = new Entry();
+    entry3->setGroup(group);
+    entry3->attributes()->set("Custom2", "another value");
+    entry3->attributes()->set("customLowerCase", "value2");
+    entry3->attributes()->set("Key with spaces", "test");
+
+    // Entries in the recycle bin do not contribute
+    auto recycledEntry = new Entry();
+    recycledEntry->setGroup(root);
+    recycledEntry->attributes()->set("RecycledKey", "value");
+    recycledEntry->attributes()->set("RecycledKeyProtected", "value", true);
+    db.recycleEntry(recycledEntry);
+
+    auto groupRecycled = new Group();
+    groupRecycled->setName("groupRecycled");
+    groupRecycled->setParent(root);
+    auto entryInRecycledGroup = new Entry();
+    entryInRecycledGroup->setGroup(groupRecycled);
+    entryInRecycledGroup->attributes()->set("RecycledKeyGroup", "value");
+    db.recycleGroup(groupRecycled);
+
+    // Check if recycledEntry and groupRecycled are actually recycled
+    QVERIFY(recycledEntry->isRecycled());
+    QVERIFY(groupRecycled->isRecycled());
+
+    db.updateCustomAttributeKeys();
+
+    QVERIFY(!db.customAttributeKeys().contains("RecycledKey"));
+    QVERIFY(!db.customAttributeKeys().contains("RecycledKeyProtected"));
+    QVERIFY(!db.customAttributeKeys().contains("RecycledKeyGroup"));
+
+    const QStringList expectedKeys = {
+        QStringLiteral("Custom1"),
+        QStringLiteral("Custom2"),
+        QStringLiteral("customLowerCase"),
+        QStringLiteral("DuplicateKey"),
+        QStringLiteral("Key with spaces"),
+        QStringLiteral("Naïve Café Österreich"),
+        QStringLiteral("ProtectedKey"),
+        QStringLiteral("東京"),
+        QStringLiteral("😀Emoji"),
+    };
+
+    QCOMPARE(db.customAttributeKeys(), expectedKeys);
 }

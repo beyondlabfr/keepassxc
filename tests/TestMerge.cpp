@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2017 KeePassXC Team <team@keepassxc.org>
+ *  Copyright (C) 2026 KeePassXC Team <team@keepassxc.org>
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -37,6 +37,7 @@ void TestMerge::initTestCase()
     qRegisterMetaType<Entry*>("Entry*");
     qRegisterMetaType<Group*>("Group*");
     QVERIFY(Crypto::init());
+    QLocale::setDefault(QLocale::c());
 }
 
 void TestMerge::init()
@@ -523,7 +524,7 @@ void TestMerge::testDeletionConflictTemplate(int mergeMode,
 
     QPointer<Group> targetGroupDeletedInTargetAfterEntryUpdatedInSource =
         dbDestination->rootGroup()->findGroupByUuid(identifiers["GroupDeletedInTargetAfterEntryUpdatedInSource"]);
-    QPointer<Entry> sourceEntryDeletedInTargetAfterEntryUpdatedInSoruce =
+    QPointer<Entry> sourceEntryDeletedInTargetAfterEntryUpdatedInSource =
         dbSource->rootGroup()->findEntryByUuid(identifiers["EntryDeletedInTargetAfterEntryUpdatedInSource"]);
 
     // simulate some work in the dbs (manipulate the history)
@@ -537,7 +538,7 @@ void TestMerge::testDeletionConflictTemplate(int mergeMode,
     delete sourceGroupDeletedInSourceBeforeEntryUpdatedInTarget.data();
     changeEntry(targetEntryDeletedInSourceAfterEntryUpdatedInTarget);
     delete targetGroupDeletedInTargetBeforeEntryUpdatedInSource.data();
-    changeEntry(sourceEntryDeletedInTargetAfterEntryUpdatedInSoruce);
+    changeEntry(sourceEntryDeletedInTargetAfterEntryUpdatedInSource);
 
     m_clock->advanceMinute(1);
 
@@ -996,8 +997,8 @@ void TestMerge::testUpdateGroupLocation()
     QVERIFY(group3SourceMoved != nullptr);
     group3SourceMoved->setParent(dbSource->rootGroup()->findChildByName("group2"));
 
-    QDateTime movedLocaltionChanged = group3SourceMoved->timeInfo().locationChanged();
-    QVERIFY(initialLocationChanged < movedLocaltionChanged);
+    QDateTime movedLocationChanged = group3SourceMoved->timeInfo().locationChanged();
+    QVERIFY(initialLocationChanged < movedLocationChanged);
 
     m_clock->advanceSecond(1);
 
@@ -1007,7 +1008,7 @@ void TestMerge::testUpdateGroupLocation()
     QPointer<Group> group3DestinationMerged1 = dbDestination->rootGroup()->findGroupByUuid(group3Uuid);
     QVERIFY(group3DestinationMerged1 != nullptr);
     QCOMPARE(group3DestinationMerged1->parent(), dbDestination->rootGroup()->findChildByName("group2"));
-    QCOMPARE(group3DestinationMerged1->timeInfo().locationChanged(), movedLocaltionChanged);
+    QCOMPARE(group3DestinationMerged1->timeInfo().locationChanged(), movedLocationChanged);
 
     m_clock->advanceSecond(1);
 
@@ -1017,7 +1018,7 @@ void TestMerge::testUpdateGroupLocation()
     QPointer<Group> group3DestinationMerged2 = dbDestination->rootGroup()->findGroupByUuid(group3Uuid);
     QVERIFY(group3DestinationMerged2 != nullptr);
     QCOMPARE(group3DestinationMerged2->parent(), dbDestination->rootGroup()->findChildByName("group2"));
-    QCOMPARE(group3DestinationMerged1->timeInfo().locationChanged(), movedLocaltionChanged);
+    QCOMPARE(group3DestinationMerged1->timeInfo().locationChanged(), movedLocationChanged);
 }
 
 /**

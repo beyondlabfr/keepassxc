@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 KeePassXC Team <team@keepassxc.org>
+ * Copyright (C) 2026 KeePassXC Team <team@keepassxc.org>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,8 +15,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef KEEPASSX_DATABASETABWIDGET_H
-#define KEEPASSX_DATABASETABWIDGET_H
+#ifndef KEEPASSXC_DATABASETABWIDGET_H
+#define KEEPASSXC_DATABASETABWIDGET_H
 
 #include "DatabaseOpenDialog.h"
 #include "core/Database.h"
@@ -24,6 +24,7 @@
 #include "gui/MessageWidget.h"
 #include "wizard/ImportWizard.h"
 
+#include <QSet>
 #include <QTabWidget>
 #include <QTimer>
 #include <QHash>
@@ -71,7 +72,7 @@ public slots:
     DatabaseWidget* newDatabase();
     void openDatabase();
     void openWebDavDatabase();
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     /** Merge in-memory WebDAV config with persisted credentials when the database copy lacks them (e.g. after lock). */
     Database::RemoteFileConfig mergeStoredWebDavCredentials(const QString& normalizedWebDavPath,
                                                             const Database::RemoteFileConfig& current) const;
@@ -98,7 +99,7 @@ public slots:
     void showDatabaseReports(bool state);
     void showDatabaseSettings(bool state);
     void showDatabaseSecurity();
-#ifdef WITH_XC_BROWSER_PASSKEYS
+#ifdef KPXC_FEATURE_BROWSER
     void showPasskeys();
     void importPasskey();
     void importPasskeyToEntry();
@@ -132,7 +133,7 @@ private:
     void updateLastDatabases(const QSharedPointer<Database>& database);
     bool warnOnExport();
     void displayUnlockDialog();
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     void loadWebDavCredentials();
     void persistWebDavCredentials() const;
     Database::RemoteFileConfig storedWebDavConfig(const QString& normalizedPath) const;
@@ -146,9 +147,10 @@ private:
     QPointer<ImportWizard> m_importWizard;
     QTimer m_lockDelayTimer;
     bool m_databaseOpenInProgress;
-#ifdef WITH_XC_WEBDAV
+    QSet<DatabaseWidget*> m_widgetsPendingClose;
+#ifdef KPXC_FEATURE_WEBDAV
     QHash<QString, Database::RemoteFileConfig> m_webDavCredentials;
 #endif
 };
 
-#endif // KEEPASSX_DATABASETABWIDGET_H
+#endif // KEEPASSXC_DATABASETABWIDGET_H

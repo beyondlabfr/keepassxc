@@ -48,6 +48,7 @@ public:
 
 signals:
     void textChanged(QString text);
+    void requestPlaceholderResolution(const QString& rawText, QString& resolvedText);
 
 public slots:
     void setText(const QString& text);
@@ -58,6 +59,9 @@ public slots:
     void setReadOnly(bool state);
     void setEchoMode(QLineEdit::EchoMode mode);
     void setClearButtonEnabled(bool enabled);
+
+protected:
+    void showEvent(QShowEvent* event) override;
 
 private slots:
     void popupPasswordGenerator();

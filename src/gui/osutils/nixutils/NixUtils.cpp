@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 KeePassXC Team <team@keepassxc.org>
+ * Copyright (C) 2025 KeePassXC Team <team@keepassxc.org>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,23 +17,29 @@
 
 #include "NixUtils.h"
 
+#include "autotype/AutoType.h"
+#include "gui/osutils/nixutils/GlobalShortcutsPortal.h"
+#include "gui/osutils/nixutils/RemoteDesktopPortal.h"
+
 #include "config-keepassx.h"
 #include "core/Config.h"
 #include "core/Global.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QDBusInterface>
+#include <QDBusReply>
 #include <QDebug>
 #include <QDir>
+#include <QMimeData>
 #include <QPointer>
+#include <QProcess>
 #include <QRandomGenerator>
 #include <QStandardPaths>
 #include <QStyle>
 #include <QTextStream>
-#ifdef WITH_XC_X11
-#include <QX11Info>
-
-#include <qpa/qplatformnativeinterface.h>
+#ifdef WITH_X11
+#include <QGuiApplication>
 
 #include "X11Funcs.h"
 #include <X11/XKBlib.h>
@@ -67,9 +73,14 @@ NixUtils* NixUtils::instance()
 NixUtils::NixUtils(QObject* parent)
     : OSUtilsBase(parent)
 {
-#ifdef WITH_XC_X11
-    dpy = QX11Info::display();
-    rootWindow = QX11Info::appRootWindow();
+#ifdef WITH_X11
+    if (auto* native = qGuiApp->nativeInterface<QNativeInterface::QX11Application>()) {
+        dpy = native->display();
+        // The offscreen platform has no X display
+        if (dpy) {
+            rootWindow = DefaultRootWindow(dpy);
+        }
+    }
 #endif
 
     // notify about system color scheme changes
@@ -81,10 +92,12 @@ NixUtils::NixUtils(QObject* parent)
                        this,
                        SLOT(handleColorSchemeChanged(QString, QString, QDBusVariant)));
 
-    QDBusMessage msg = QDBusMessage::createMethodCall(
-        "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Settings", "Read");
-    msg << QVariant("org.freedesktop.appearance") << QVariant("color-scheme");
-    sessionBus.callWithCallback(msg, this, SLOT(handleColorSchemeRead(QDBusVariant)));
+    QDBusInterface desktopPortal(
+        "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Settings");
+    QDBusReply<QDBusVariant> reply = desktopPortal.call("ReadOne", "org.freedesktop.appearance", "color-scheme");
+    if (reply.isValid()) {
+        setColorScheme(reply.value());
+    }
 }
 
 NixUtils::~NixUtils() = default;
@@ -145,15 +158,14 @@ void NixUtils::setLaunchAtStartup(bool enable)
 
         const QString appImagePath = QString::fromLocal8Bit(qgetenv("APPIMAGE"));
         const bool isAppImage = !appImagePath.isNull() && QFile::exists(appImagePath);
-        const QString executeablePathOrName = isAppImage ? appImagePath : QApplication::applicationName().toLower();
+        const QString executablePathOrName = isAppImage ? appImagePath : QApplication::applicationName().toLower();
 
         QTextStream stream(&desktopFile);
-        stream.setCodec("UTF-8");
         stream << QStringLiteral("[Desktop Entry]") << '\n'
                << QStringLiteral("Name=") << QApplication::applicationDisplayName() << '\n'
                << QStringLiteral("GenericName=") << tr("Password Manager") << '\n'
-               << QStringLiteral("Exec=") << executeablePathOrName << '\n'
-               << QStringLiteral("TryExec=") << executeablePathOrName << '\n'
+               << QStringLiteral("Exec=") << executablePathOrName << '\n'
+               << QStringLiteral("TryExec=") << executablePathOrName << '\n'
                << QStringLiteral("Icon=") << QApplication::applicationName().toLower() << '\n'
                << QStringLiteral("StartupWMClass=keepassxc") << '\n'
                << QStringLiteral("StartupNotify=false") << '\n'
@@ -214,15 +226,13 @@ void NixUtils::launchAtStartupRequested(uint response, const QVariantMap& result
 
 bool NixUtils::isCapslockEnabled()
 {
-#ifdef WITH_XC_X11
-    QPlatformNativeInterface* native = QGuiApplication::platformNativeInterface();
-    auto* display = native->nativeResourceForWindow("display", nullptr);
-    if (!display) {
-        return false;
-    }
+#ifdef WITH_X11
+    if (auto* native = qGuiApp->nativeInterface<QNativeInterface::QX11Application>()) {
+        auto* display = native->display();
+        if (!display) {
+            return false;
+        }
 
-    QString platform = QGuiApplication::platformName();
-    if (platform == "xcb") {
         unsigned state = 0;
         if (XkbGetIndicatorState(reinterpret_cast<Display*>(display), XkbUseCoreKbd, &state) == Success) {
             return ((state & 1u) != 0);
@@ -244,11 +254,17 @@ void NixUtils::setUserInputProtection(bool enable)
 void NixUtils::registerNativeEventFilter()
 {
     qApp->installNativeEventFilter(this);
+
+    if (externalGlobalShortcutsConfigurator()) {
+        // The portal is lazy-loaded and loading it here will initialize it early
+        globalShortcutsPortal();
+    }
 }
 
-bool NixUtils::nativeEventFilter(const QByteArray& eventType, void* message, long*)
+bool NixUtils::nativeEventFilter(const QByteArray& eventType, void* message, qintptr* result)
 {
-#ifdef WITH_XC_X11
+    Q_UNUSED(result)
+#ifdef WITH_X11
     if (eventType != QByteArrayLiteral("xcb_generic_event_t")) {
         return false;
     }
@@ -270,7 +286,7 @@ bool NixUtils::nativeEventFilter(const QByteArray& eventType, void* message, lon
 
 bool NixUtils::triggerGlobalShortcut(uint keycode, uint modifiers)
 {
-#ifdef WITH_XC_X11
+#ifdef WITH_X11
     QHashIterator<QString, QSharedPointer<globalShortcut>> i(m_globalShortcuts);
     while (i.hasNext()) {
         i.next();
@@ -288,8 +304,16 @@ bool NixUtils::triggerGlobalShortcut(uint keycode, uint modifiers)
 
 bool NixUtils::registerGlobalShortcut(const QString& name, Qt::Key key, Qt::KeyboardModifiers modifiers, QString* error)
 {
-#ifdef WITH_XC_X11
-    auto keycode = XKeysymToKeycode(dpy, qcharToNativeKeyCode(key));
+    if (externalGlobalShortcutsConfigurator()) {
+        return true;
+    }
+
+#ifdef WITH_X11
+    if (!dpy) {
+        return true;
+    }
+
+    auto keycode = XKeysymToKeycode(dpy, qtToNativeKeyCode(key));
     auto modifierscode = qtToNativeModifiers(modifiers);
 
     // Check if this key combo is registered to another shortcut
@@ -340,7 +364,11 @@ bool NixUtils::registerGlobalShortcut(const QString& name, Qt::Key key, Qt::Keyb
 
 bool NixUtils::unregisterGlobalShortcut(const QString& name)
 {
-#ifdef WITH_XC_X11
+    if (externalGlobalShortcutsConfigurator()) {
+        return true;
+    }
+
+#ifdef WITH_X11
     if (!m_globalShortcuts.contains(name)) {
         return false;
     }
@@ -358,10 +386,59 @@ bool NixUtils::unregisterGlobalShortcut(const QString& name)
     return true;
 }
 
-void NixUtils::handleColorSchemeRead(QDBusVariant value)
+bool NixUtils::setClipboardText(const QString& text)
 {
-    value = qvariant_cast<QDBusVariant>(value.variant());
-    setColorScheme(value);
+    if (!autoType()->isAvailable() || !autoType()->usesDesktopPortal()
+        || !config()->get(Config::AutoTypeDesktopPortalUseClipboard).toBool()) {
+        return false;
+    }
+
+    auto* portal = remoteDesktopPortal();
+    if (!portal->isClipboardAvailable()) {
+        return false;
+    } else if (portal->setClipboardText(text)) {
+        return true;
+    }
+
+    qWarning("Failed to set clipboard text via remote desktop portal, falling back to standard clipboard");
+    return false;
+}
+
+bool NixUtils::clearClipboardText(const QString& text)
+{
+    // The remote desktop portal tracks whether KeePassXC owns the selection, so
+    // it does not need the copied text to decide whether clearing is safe.
+    auto* portal = m_remoteDesktopPortal;
+    if (portal && autoType()->isAvailable() && autoType()->usesDesktopPortal()
+        && config()->get(Config::AutoTypeDesktopPortalUseClipboard).toBool() && portal->isClipboardAvailable()
+        && portal->hasSession()) {
+        if (portal->clearClipboardText()) {
+            return true;
+        }
+
+        qWarning("Failed to clear clipboard text via remote desktop portal, falling back to standard clipboard");
+        return false;
+    }
+
+    if (!qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
+        return false;
+    }
+
+    // Don't clear data another application has put into the clipboard in the meantime.
+    auto* clipboard = QApplication::clipboard();
+    auto* mimeData = clipboard ? clipboard->mimeData(QClipboard::Clipboard) : nullptr;
+    if (mimeData && !mimeData->formats().isEmpty() && mimeData->text() != text) {
+        return false;
+    }
+
+    // Gnome Wayland doesn't let apps modify the clipboard when not in focus, so force clear.
+    return QProcess::startDetached(QStringLiteral("wl-copy"), {QStringLiteral("-c")});
+}
+
+bool NixUtils::isClipboardAvailable()
+{
+    return autoType()->isAvailable() && autoType()->usesDesktopPortal()
+           && remoteDesktopPortal()->isClipboardAvailable();
 }
 
 void NixUtils::handleColorSchemeChanged(QString ns, QString key, QDBusVariant value)
@@ -394,7 +471,7 @@ quint64 NixUtils::getProcessStartTime() const
 
     auto startIndex = processStatInfo.lastIndexOf(')');
     if (startIndex != -1) {
-        auto tokens = processStatInfo.midRef(startIndex + 2).split(' ');
+        auto tokens = QStringView{processStatInfo}.mid(startIndex + 2).split(' ');
         if (tokens.size() >= 20) {
             bool ok;
             auto time = tokens[19].toULongLong(&ok);
@@ -410,4 +487,58 @@ quint64 NixUtils::getProcessStartTime() const
 
     qDebug() << "nixutils: failed to find ')' in " << processStatPath;
     return 0;
+}
+
+bool NixUtils::externalGlobalShortcutsConfigurator()
+{
+#ifndef WITH_X11
+    return true;
+#else
+    if (isWayland()) {
+        return true;
+    } else if (config()->get(Config::AutoTypePreferDesktopPortals).toBool()) {
+        return globalShortcutsPortal()->isAvailable();
+    }
+
+    return false;
+#endif
+}
+
+bool NixUtils::isWayland() const
+{
+    return QApplication::platformName() == QLatin1String("wayland");
+}
+
+GlobalShortcutsPortal* NixUtils::globalShortcutsPortal()
+{
+    if (!m_globalShortcutsPortal) {
+        m_globalShortcutsPortal = new GlobalShortcutsPortal(this);
+        connect(m_globalShortcutsPortal,
+                &GlobalShortcutsPortal::globalShortcutTriggered,
+                this,
+                [this](const QString& name, const QString& search) { emit globalShortcutTriggered(name, search); });
+        connect(
+            m_globalShortcutsPortal,
+            &GlobalShortcutsPortal::globalShortcutChanged,
+            this,
+            [this](const QString& name, const QString& description) { emit globalShortcutChanged(name, description); });
+    }
+
+    return m_globalShortcutsPortal;
+}
+
+RemoteDesktopPortal* NixUtils::remoteDesktopPortal()
+{
+    if (!m_remoteDesktopPortal) {
+        m_remoteDesktopPortal = new RemoteDesktopPortal(this);
+    }
+
+    return m_remoteDesktopPortal;
+}
+
+void NixUtils::configureGlobalShortcut(const QString& name)
+{
+    Q_UNUSED(name)
+
+    globalShortcutsPortal()->configureShortcuts();
 }

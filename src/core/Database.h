@@ -100,7 +100,7 @@ private:
     bool backupDatabase(const QString& filePath, const QString& destinationFilePath);
     bool restoreDatabase(const QString& filePath, const QString& fromBackupFilePath);
     bool performSave(const QString& filePath, SaveAction flags, const QString& backupFilePath, QString* error);
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     bool openFromWebDav(const QString& filePath, QSharedPointer<const CompositeKey> key, QString* error);
     bool saveToWebDav(const QString& filePath, SaveAction action, const QString& backupFilePath, QString* error);
 #endif
@@ -169,6 +169,7 @@ public:
     void setDeletedObjects(const QList<DeletedObject>& delObjs);
 
     const QStringList& commonUsernames() const;
+    const QStringList& customAttributeKeys() const;
     const QStringList& tagList() const;
     void removeTag(const QString& tag);
 
@@ -199,6 +200,7 @@ public slots:
     void markAsModified();
     void markAsClean();
     void updateCommonUsernames(int topN = 10);
+    void updateCustomAttributeKeys();
     void updateTagList();
     void markNonDataChange();
 
@@ -284,6 +286,7 @@ private:
 
     QStringList m_commonUsernames;
     QStringList m_tagList;
+    QStringList m_customAttributeKeys;
 
     QUuid m_uuid;
     static QHash<QUuid, QPointer<Database>> s_uuidMap;

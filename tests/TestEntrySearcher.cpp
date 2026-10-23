@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2026 KeePassXC Team <team@keepassxc.org>
  *  Copyright (C) 2014 Florian Geyer <blueice@fobos.de>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -23,6 +24,11 @@
 #include <QTest>
 
 QTEST_GUILESS_MAIN(TestEntrySearcher)
+
+void TestEntrySearcher::initTestCase()
+{
+    QLocale::setDefault(QLocale::c());
+}
 
 void TestEntrySearcher::init()
 {
@@ -142,6 +148,16 @@ void TestEntrySearcher::testSearch()
     QCOMPARE(m_searchResult.count(), 1);
 
     m_searchResult = m_entrySearcher.search("+user:email", m_rootGroup);
+    QCOMPARE(m_searchResult.count(), 0);
+
+    // Test that + modifier enforces case sensitivity
+    m_searchResult = m_entrySearcher.search("+password:testpass", m_rootGroup);
+    QCOMPARE(m_searchResult.count(), 1);
+
+    m_searchResult = m_entrySearcher.search("+password:Testpass", m_rootGroup);
+    QCOMPARE(m_searchResult.count(), 0);
+
+    m_searchResult = m_entrySearcher.search("+password:TestPass", m_rootGroup);
     QCOMPARE(m_searchResult.count(), 0);
 
     // Terms are logical AND together

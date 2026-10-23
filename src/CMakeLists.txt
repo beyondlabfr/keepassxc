@@ -1,4 +1,4 @@
-#  Copyright (C) 2023 KeePassXC Team <team@keepassxc.org>
+#  Copyright (C) 2026 KeePassXC Team <team@keepassxc.org>
 #  Copyright (C) 2010 Felix Geyer <debfx@fobos.de>
 #
 #  This program is free software: you can redistribute it and/or modify
@@ -16,19 +16,6 @@
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 
-add_feature_info(Auto-Type WITH_XC_AUTOTYPE "Automatic password typing")
-add_feature_info(Networking WITH_XC_NETWORKING "Compile KeePassXC with network access code (e.g. for downloading website icons)")
-add_feature_info(KeePassXC-Browser WITH_XC_BROWSER "Browser integration with KeePassXC-Browser")
-add_feature_info(Passkeys WITH_XC_BROWSER_PASSKEYS "Passkeys support for browser integration")
-add_feature_info(SSHAgent WITH_XC_SSHAGENT "SSH agent integration compatible with KeeAgent")
-add_feature_info(KeeShare WITH_XC_KEESHARE "Sharing integration with KeeShare")
-add_feature_info(YubiKey WITH_XC_YUBIKEY "YubiKey HMAC-SHA1 challenge-response")
-add_feature_info(WebDAV WITH_XC_WEBDAV "Open and save databases over WebDAV with basic authentication")
-add_feature_info(UpdateCheck WITH_XC_UPDATECHECK "Automatic update checking")
-if(UNIX AND NOT APPLE)
-    add_feature_info(FdoSecrets WITH_XC_FDOSECRETS "Implement freedesktop.org Secret Storage Spec server side API.")
-endif()
-
 set(core_SOURCES
         core/Alloc.cpp
         core/AutoTypeAssociations.cpp
@@ -42,6 +29,7 @@ set(core_SOURCES
         core/Entry.cpp
         core/EntryAttachments.cpp
         core/EntryAttributes.cpp
+        core/EntryPlaceholders.cpp
         core/EntrySearcher.cpp
         core/FileWatcher.cpp
         core/Group.cpp
@@ -61,7 +49,6 @@ set(core_SOURCES
         core/Totp.cpp
         core/Translator.cpp
         cli/Utils.cpp
-        cli/TextStream.cpp
         crypto/Crypto.cpp
         crypto/CryptoHash.cpp
         crypto/Random.cpp
@@ -97,6 +84,11 @@ set(core_SOURCES
         keys/FileKey.cpp
         keys/PasswordKey.cpp
         keys/ChallengeResponseKey.cpp
+        keys/drivers/YubiKey.h
+        keys/drivers/YubiKey.cpp
+        keys/drivers/YubiKeyInterface.cpp
+        keys/drivers/YubiKeyInterfaceUSB.cpp
+        keys/drivers/YubiKeyInterfacePCSC.cpp
         streams/HashedBlockStream.cpp
         streams/HashingStream.cpp
         streams/HmacBlockStream.cpp
@@ -105,7 +97,7 @@ set(core_SOURCES
         streams/StoreDataStream.cpp
         streams/SymmetricCipherStream.cpp)
 
-if(WITH_XC_WEBDAV)
+if(KPXC_FEATURE_WEBDAV)
     list(APPEND core_SOURCES
         core/remote/WebDavClient.cpp)
 endif()
@@ -208,6 +200,7 @@ set(gui_SOURCES
         gui/reports/ReportsPageHibp.cpp
         gui/reports/ReportsWidgetStatistics.cpp
         gui/reports/ReportsPageStatistics.cpp
+        gui/osutils/DeviceListener.cpp
         gui/osutils/OSUtilsBase.cpp
         gui/osutils/ScreenLockListener.cpp
         gui/osutils/ScreenLockListenerPrivate.cpp
@@ -229,6 +222,7 @@ set(gui_SOURCES
 
 if(APPLE)
     list(APPEND gui_SOURCES
+            gui/osutils/macutils/DeviceListenerMac.cpp
             gui/osutils/macutils/MacPasteboard.cpp
             gui/osutils/macutils/MacUtils.cpp
             gui/osutils/macutils/ScreenLockListenerMac.cpp
@@ -242,18 +236,23 @@ endif()
 
 if(UNIX AND NOT APPLE)
     list(APPEND gui_SOURCES
+            gui/osutils/nixutils/DesktopPortal.cpp
+            gui/osutils/nixutils/DeviceListenerLibUsb.cpp
+            gui/osutils/nixutils/GlobalShortcutsPortal.cpp
+            gui/osutils/nixutils/NixUtils.cpp
+            gui/osutils/nixutils/RemoteDesktopPortal.cpp
             gui/osutils/nixutils/ScreenLockListenerDBus.cpp
-            gui/osutils/nixutils/NixUtils.cpp)
+    )
     if("${CMAKE_SYSTEM}" MATCHES "Linux")
         list(APPEND core_SOURCES
                 quickunlock/Polkit.cpp
                 quickunlock/PolkitDbusTypes.cpp)
     endif()
-    if(WITH_XC_X11)
+    if(WITH_X11)
         list(APPEND gui_SOURCES
             gui/osutils/nixutils/X11Funcs.cpp)
     endif()
-    qt5_add_dbus_adaptor(gui_SOURCES
+    qt6_add_dbus_adaptor(gui_SOURCES
             gui/org.keepassxc.KeePassXC.MainWindow.xml
             gui/MainWindow.h
             MainWindow)
@@ -263,19 +262,35 @@ if(UNIX AND NOT APPLE)
         PROPERTIES
         INCLUDE "quickunlock/PolkitDbusTypes.h"
         )
-    qt5_add_dbus_interface(core_SOURCES
+    qt6_add_dbus_interface(core_SOURCES
         quickunlock/dbus/org.freedesktop.PolicyKit1.Authority.xml
         polkit_dbus
     )
-
-    find_library(KEYUTILS_LIBRARIES NAMES keyutils)
-    if(NOT KEYUTILS_LIBRARIES)
-		message(FATAL_ERROR "Could not find libkeyutils")
-    endif()
+    qt6_add_dbus_interface(core_SOURCES
+        gui/osutils/nixutils/dbus/org.freedesktop.portal.Request.xml
+        xdp_request
+    )
+    qt6_add_dbus_interface(core_SOURCES
+        gui/osutils/nixutils/dbus/org.freedesktop.portal.Session.xml
+        xdp_session
+    )
+    qt6_add_dbus_interface(core_SOURCES
+        gui/osutils/nixutils/dbus/org.freedesktop.portal.GlobalShortcuts.xml
+        xdp_globalshortcuts
+    )
+    qt6_add_dbus_interface(core_SOURCES
+        gui/osutils/nixutils/dbus/org.freedesktop.portal.RemoteDesktop.xml
+        xdp_remotedesktop
+    )
+    qt6_add_dbus_interface(core_SOURCES
+        gui/osutils/nixutils/dbus/org.freedesktop.portal.Clipboard.xml
+        xdp_clipboard
+    )
 endif()
 
 if(WIN32)
     list(APPEND gui_SOURCES
+            gui/osutils/winutils/DeviceListenerWin.cpp
             gui/osutils/winutils/ScreenLockListenerWin.cpp
             gui/osutils/winutils/WinUtils.cpp)
     if (WINSDK)
@@ -283,86 +298,24 @@ if(WIN32)
     endif()
 endif()
 
-if(WITH_XC_YUBIKEY)
-    list(APPEND gui_SOURCES gui/osutils/DeviceListener.cpp)
-    if(APPLE)
-        list(APPEND gui_SOURCES gui/osutils/macutils/DeviceListenerMac.cpp)
-    elseif(UNIX)
-        list(APPEND gui_SOURCES gui/osutils/nixutils/DeviceListenerLibUsb.cpp)
-    elseif(WIN32)
-        list(APPEND gui_SOURCES gui/osutils/winutils/DeviceListenerWin.cpp)
-    endif()
-endif()
-
 add_subdirectory(browser)
 add_subdirectory(proxy)
-if(WITH_XC_BROWSER)
+if(KPXC_FEATURE_BROWSER)
     set(browser_LIB browser)
     list(APPEND gui_SOURCES
             gui/dbsettings/DatabaseSettingsWidgetBrowser.cpp
             gui/entry/EntryURLModel.cpp
-            gui/reports/ReportsWidgetBrowserStatistics.cpp
-            gui/reports/ReportsPageBrowserStatistics.cpp)
-endif()
-
-if(WITH_XC_BROWSER_PASSKEYS)
-    list(APPEND gui_SOURCES
-            gui/reports/ReportsWidgetPasskeys.cpp
+            gui/reports/ReportsPageBrowserStatistics.cpp
             gui/reports/ReportsPagePasskeys.cpp
+            gui/reports/ReportsWidgetBrowserStatistics.cpp
+            gui/reports/ReportsWidgetPasskeys.cpp
             gui/passkeys/PasskeyExporter.cpp
             gui/passkeys/PasskeyExportDialog.cpp
             gui/passkeys/PasskeyImporter.cpp
             gui/passkeys/PasskeyImportDialog.cpp)
 endif()
 
-add_subdirectory(autotype)
-add_subdirectory(cli)
-add_subdirectory(qrcode)
-set(qrcode_LIB qrcode)
-
-add_subdirectory(keeshare)
-if(WITH_XC_KEESHARE)
-    set(keeshare_LIB keeshare)
-endif()
-
-add_subdirectory(sshagent)
-if(WITH_XC_SSHAGENT)
-    set(sshagent_LIB sshagent)
-endif()
-
-add_subdirectory(fdosecrets)
-if(WITH_XC_FDOSECRETS)
-    set(fdosecrets_LIB fdosecrets)
-endif()
-
-add_subdirectory(thirdparty)
-
-set(autotype_SOURCES
-        autotype/AutoType.cpp
-        autotype/AutoTypeAction.cpp
-        autotype/AutoTypeMatchModel.cpp
-        autotype/AutoTypeMatchView.cpp
-        autotype/AutoTypeSelectDialog.cpp
-        autotype/PickcharsDialog.cpp
-        autotype/WindowSelectComboBox.cpp)
-
-add_library(autotype STATIC ${autotype_SOURCES})
-target_link_libraries(autotype Qt5::Core Qt5::Widgets)
-
-if(WITH_XC_YUBIKEY)
-    list(APPEND core_SOURCES
-        keys/drivers/YubiKey.h
-        keys/drivers/YubiKey.cpp
-        keys/drivers/YubiKeyInterface.cpp
-        keys/drivers/YubiKeyInterfaceUSB.cpp
-        keys/drivers/YubiKeyInterfacePCSC.cpp)
-else()
-    list(APPEND core_SOURCES
-        keys/drivers/YubiKey.h
-        keys/drivers/YubiKeyStub.cpp)
-endif()
-
-if(WITH_XC_NETWORKING)
+if(KPXC_FEATURE_NETWORK)
     list(APPEND gui_SOURCES
             networking/HibpDownloader.cpp
             networking/NetworkManager.cpp
@@ -372,37 +325,63 @@ if(WITH_XC_NETWORKING)
             gui/IconDownloaderDialog.cpp)
 endif()
 
-configure_file(config-keepassx.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-keepassx.h)
-configure_file(git-info.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/git-info.h)
+add_subdirectory(cli)
+add_subdirectory(thirdparty)
+
+add_subdirectory(autotype)
+set(autotype_LIB autotype)
+
+# TODO: Refactor to gui sources
+add_subdirectory(qrcode)
+set(qrcode_LIB qrcode)
+
+# TODO: Move to gui sources on refactor
+add_subdirectory(keeshare)
+set(keeshare_LIB keeshare)
+
+add_subdirectory(sshagent)
+if(KPXC_FEATURE_SSHAGENT)
+    set(sshagent_LIB sshagent)
+endif()
+
+add_subdirectory(fdosecrets)
+if(KPXC_FEATURE_FDOSECRETS)
+    set(fdosecrets_LIB fdosecrets)
+endif()
+
+configure_file(config-keepassx.h.in ${CMAKE_CURRENT_BINARY_DIR}/config-keepassx.h)
+configure_file(git-info.h.in ${CMAKE_CURRENT_BINARY_DIR}/git-info.h)
+
+# SVG Widgets
+find_package(Qt6 REQUIRED COMPONENTS SvgWidgets)
 
 # Core Library Definition
 add_library(keepassxc_core STATIC ${core_SOURCES})
-set_target_properties(keepassxc_core PROPERTIES COMPILE_DEFINITIONS KEEPASSX_BUILDING_CORE)
+target_compile_definitions(keepassxc_core PRIVATE KPXC_BUILDING_CORE)
 target_link_libraries(keepassxc_core 
         ${qrcode_LIB}
-        Qt5::Core
-        Qt5::Concurrent
+        Qt6::Core
+        Qt6::Concurrent
         ${BOTAN_LIBRARIES}
         ${PCSC_LIBRARIES}
         ${ZXCVBN_LIBRARIES}
         ${ZLIB_LIBRARIES}
         ${MINIZIP_LIBRARIES}
-        ${ARGON2_LIBRARIES}
-        ${KEYUTILS_LIBRARIES}
         ${thirdparty_LIBRARIES})
 
-if(WITH_XC_WEBDAV)
-    target_link_libraries(keepassxc_core Qt5::Network)
+if(KPXC_FEATURE_WEBDAV)
+    target_link_libraries(keepassxc_core Qt6::Network)
 endif()
 
 # GUI Library Definition
 add_library(keepassxc_gui STATIC ${gui_SOURCES})
-set_target_properties(keepassxc_gui PROPERTIES COMPILE_DEFINITIONS KEEPASSX_BUILDING_CORE)
+target_compile_definitions(keepassxc_gui PRIVATE KPXC_BUILDING_CORE)
 target_link_libraries(keepassxc_gui
         keepassxc_core
-        Qt5::Network
-        Qt5::Widgets
-        autotype
+        Qt6::Network
+        Qt6::SvgWidgets
+        Qt6::Widgets
+        ${autotype_LIB}
         ${browser_LIB}
         ${fdosecrets_LIB}
         ${keeshare_LIB}
@@ -410,19 +389,21 @@ target_link_libraries(keepassxc_gui
 
 if(APPLE)
     target_link_libraries(keepassxc_gui "-framework Foundation -framework AppKit -framework Carbon -framework Security -framework LocalAuthentication -framework ScreenCaptureKit")
-    if(Qt5MacExtras_FOUND)
-        target_link_libraries(keepassxc_gui Qt5::MacExtras)
+    if(Qt6MacExtras_FOUND)
+        target_link_libraries(keepassxc_gui Qt6::MacExtras)
     endif()
 endif()
 if(HAIKU)
     target_link_libraries(keepassxc_gui network)
 endif()
 if(UNIX AND NOT APPLE)
-    target_link_libraries(keepassxc_core Qt5::DBus ${LIBUSB_LIBRARIES})
-    if(WITH_XC_X11)
-        target_link_libraries(keepassxc_gui Qt5::X11Extras X11)
+    target_link_libraries(keepassxc_core Qt6::DBus ${LIBUSB_LIBRARIES})
+    if("${CMAKE_SYSTEM}" MATCHES "Linux")
+        target_link_libraries(keepassxc_core ${KEYUTILS_LIBRARIES})
     endif()
-    include_directories(${Qt5Gui_PRIVATE_INCLUDE_DIRS})
+    if(WITH_X11)
+        target_link_libraries(keepassxc_gui X11)
+    endif()
 endif()
 if(WIN32)
     target_link_libraries(keepassxc_gui Wtsapi32.lib Ws2_32.lib)
@@ -432,7 +413,16 @@ if(WIN32)
 endif()
 
 # Main Executable Definition
+unset(_restore_vcpkg_applocal_deps)
+if(WIN32 AND WITH_BUILD_QT AND VCPKG_APPLOCAL_DEPS)
+    set(VCPKG_APPLOCAL_DEPS OFF)
+    set(_restore_vcpkg_applocal_deps ON)
+endif()
 add_executable(${PROGNAME} main.cpp)
+if(_restore_vcpkg_applocal_deps)
+    set(VCPKG_APPLOCAL_DEPS ON)
+    unset(_restore_vcpkg_applocal_deps)
+endif()
 target_link_libraries(${PROGNAME} keepassxc_gui)
 set_target_properties(${PROGNAME} PROPERTIES ENABLE_EXPORTS ON)
 
@@ -454,7 +444,7 @@ elseif(APPLE AND WITH_APP_BUNDLE)
     set(MACOSX_BUNDLE_IDENTIFIER org.keepassxc.keepassxc)
     set(MACOSX_BUNDLE_ICON_NAME keepassxc)
     set(MACOSX_BUNDLE_APPLE_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/share/macosx/keepassxc.entitlements")
-    configure_file("${CMAKE_SOURCE_DIR}/share/macosx/Info.plist.cmake" ${CMAKE_CURRENT_BINARY_DIR}/Info.plist)
+    configure_file("${CMAKE_SOURCE_DIR}/share/macosx/Info.plist.in" ${CMAKE_CURRENT_BINARY_DIR}/Info.plist)
     install(FILES "${CMAKE_SOURCE_DIR}/share/macosx/embedded.provisionprofile" DESTINATION ${BUNDLE_INSTALL_DIR})
     set(MACOSX_BUNDLE_RESOURCE_FILES
             "${CMAKE_SOURCE_DIR}/share/macosx/Assets.car"
@@ -502,11 +492,12 @@ install(TARGETS ${PROGNAME}
 
 # Windows Installer Definition
 if(WIN32)
-    if(${CMAKE_SIZEOF_VOID_P} EQUAL "8")
-        set(OUTPUT_FILE_POSTFIX "Win64")
-    else()
-        set(OUTPUT_FILE_POSTFIX "Win32")
-    endif()
+    # Deploy used libraries into build directory for debugging
+    add_custom_command(TARGET ${PROGNAME} POST_BUILD
+        COMMAND ${DEPLOYQT_EXE}
+            --dir $<TARGET_FILE_DIR:${PROGNAME}>
+            $<IF:$<CONFIG:Debug>,--debug,--release>
+            $<TARGET_FILE:${PROGNAME}>)
 
     # We have to copy the license file in the configuration phase.
     # CMake checks that CPACK_RESOURCE_FILE_LICENSE actually exists and
@@ -525,7 +516,7 @@ if(WIN32)
     set(CPACK_GENERATOR "ZIP;WIX")
     set(CPACK_COMPONENTS_ALL "")
     set(CPACK_STRIP_FILES OFF)
-    set(CPACK_PACKAGE_FILE_NAME "${PROGNAME}-${KEEPASSXC_VERSION}-${OUTPUT_FILE_POSTFIX}")
+    set(CPACK_PACKAGE_FILE_NAME "${PROGNAME}-${KEEPASSXC_VERSION}-${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
     set(CPACK_PACKAGE_INSTALL_DIRECTORY ${PROGNAME})
     set(CPACK_PACKAGE_VERSION ${KEEPASSXC_VERSION_CLEAN})
     set(CPACK_PACKAGE_VENDOR "${PROGNAME} Team")
@@ -559,7 +550,68 @@ if(WIN32)
             "${CMAKE_SOURCE_DIR}/share/windows/KPXC_ExitDlg.wxs")
     set(CPACK_WIX_PROPERTY_ARPURLINFOABOUT  "https://keepassxc.org")
     set(CPACK_WIX_EXTENSIONS "WixUtilExtension.dll")
+    string(TOLOWER "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}" _windows_package_arch)
+    if(NOT _windows_package_arch)
+        string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _windows_package_arch)
+    endif()
+    if(_windows_package_arch MATCHES "^(arm64|aarch64)$")
+        set(CPACK_WIX_ARCHITECTURE arm64)
+    elseif(_windows_package_arch MATCHES "^(amd64|x64|x86_64)$")
+        set(CPACK_WIX_ARCHITECTURE x64)
+    else()
+        message(FATAL_ERROR
+                "Unsupported Windows package architecture: "
+                "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID} (${CMAKE_SYSTEM_PROCESSOR})")
+    endif()
     include(CPack)
+
+    # Cross compile builds need to use a special qtpaths script to find the right binaries to install
+    find_program(_QTPATHS_BAT host-qtpaths.bat HINTS "${Qt6_PREFIX}/bin" ENV PATH)
+    if(_QTPATHS_BAT)
+        message(STATUS "Using qtpaths script: ${_QTPATHS_BAT}")
+        set(_QTPATHS "--qtpaths \"${_QTPATHS_BAT}\"")
+    endif()
+
+    # Use windeployqt.exe to setup Qt dependencies
+    install(CODE "
+        if(\"\${CMAKE_INSTALL_CONFIG_NAME}\" STREQUAL \"Debug\")
+            set(_wdqt_mode --debug)
+        else()
+            set(_wdqt_mode --release)
+        endif()
+        execute_process(
+            COMMAND ${DEPLOYQT_EXE} \${_wdqt_mode} ${_QTPATHS} ${PROGNAME}.exe
+            WORKING_DIRECTORY \${CMAKE_INSTALL_PREFIX}
+            OUTPUT_QUIET
+            RESULT_VARIABLE _wdqt_result
+        )
+        if(NOT \${_wdqt_result} EQUAL 0)
+            message(FATAL_ERROR \"windeployqt failed with exit code \${_wdqt_result}\")
+        endif()"
+        COMPONENT Runtime)
+
+    if(WITH_BUILD_QT)
+        install(CODE "
+            if(\"\${CMAKE_INSTALL_CONFIG_NAME}\" STREQUAL \"Debug\")
+                set(_vcpkg_bin_dir \"${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/bin\")
+            else()
+                set(_vcpkg_bin_dir \"${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin\")
+            endif()
+            file(GLOB _installed_executables \"\${CMAKE_INSTALL_PREFIX}/*.exe\")
+            foreach(_installed_executable IN LISTS _installed_executables)
+                execute_process(
+                    COMMAND \"${KPXC_VCPKG_EXECUTABLE}\" z-applocal
+                            \"--target-binary=\${_installed_executable}\"
+                            \"--installed-bin-dir=\${_vcpkg_bin_dir}\"
+                    RESULT_VARIABLE _applocal_result
+                )
+                if(NOT \${_applocal_result} EQUAL 0)
+                    message(FATAL_ERROR
+                            \"vcpkg app-local failed for \${_installed_executable} with exit code \${_applocal_result}\")
+                endif()
+            endforeach()"
+            COMPONENT Runtime)
+    endif()
 
     if(NOT VCPKG_INSTALLED_DIR)
         install(CODE "set(gp_tool \"objdump\")" COMPONENT Runtime)
@@ -569,19 +621,8 @@ if(WIN32)
                       fixup_bundle(\"\${CMAKE_INSTALL_PREFIX}/${PROGNAME}.exe\" \"\" \"\")"
                 COMPONENT Runtime)
 
-        # Use windeployqt.exe to setup Qt dependencies
-        if(Qt5Core_VERSION VERSION_LESS "5.14.1")
-            set(WINDEPLOYQT_MODE "--release")
-            if(CMAKE_BUILD_TYPE_LOWER STREQUAL "debug")
-                set(WINDEPLOYQT_MODE "--debug")
-            endif()
-        endif()
-
-        install(CODE "execute_process(COMMAND ${WINDEPLOYQT_EXE} ${PROGNAME}.exe ${WINDEPLOYQT_MODE} WORKING_DIRECTORY \${CMAKE_INSTALL_PREFIX} OUTPUT_QUIET)"
-                COMPONENT Runtime)
-
         # install OpenSSL library
-        if(WITH_XC_NETWORKING)
+        if(KPXC_FEATURE_NETWORK)
             find_file(OPENSSL_DLL
                     NAMES libssl-3.dll libssl-3-x64.dll
                     HINTS "${OPENSSL_ROOT_DIR}/bin"
@@ -600,53 +641,10 @@ if(WIN32)
 
             install(FILES ${OPENSSL_DLL} ${CRYPTO_DLL} DESTINATION ".")
         endif()
-    else()
-        # vcpkg builds: deploy Qt + runtime dependencies into the install prefix
-        #
-        # Note: windeployqt queries qmake at runtime; ensure qmake is reachable via PATH.
-        # vcpkg layout provides qmake under: <prefix>/tools/qt5/bin
-        set(_vcpkg_qt_tools_bin "${Qt5_PREFIX}/tools/qt5/bin")
-        set(_vcpkg_bin_dir "${Qt5_PREFIX}/bin")
-
-        # Use windeployqt.exe to setup Qt dependencies (platform plugins, imageformats, etc.)
-        set(_wdq_install_code [==[
-            # Normalize PATH to avoid invalid backslash escapes in CMake scripts on Windows
-            set(_env_path "$ENV{PATH}")
-            string(REPLACE "\\" "/" _env_path "${_env_path}")
-
-            # Escape semicolons to prevent CMake list-splitting of the PATH argument
-            set(_deploy_path "@VCPKG_QT_TOOLS_BIN@;@VCPKG_BIN_DIR@;${_env_path}")
-            string(REPLACE ";" "\\;" _deploy_path "${_deploy_path}")
-
-            execute_process(
-                COMMAND "${CMAKE_COMMAND}" -E env "PATH=${_deploy_path}" "@WINDEPLOYQT_EXE@" --release --no-angle --no-opengl-sw --dir "${CMAKE_INSTALL_PREFIX}" "${CMAKE_INSTALL_PREFIX}/@PROGNAME@.exe"
-                RESULT_VARIABLE _wdq_res
-                OUTPUT_VARIABLE _wdq_out
-                ERROR_VARIABLE _wdq_err
-            )
-
-            if(_wdq_res)
-                message(FATAL_ERROR "windeployqt failed (exit=${_wdq_res}).\nSTDOUT:\n${_wdq_out}\nSTDERR:\n${_wdq_err}\n")
-            endif()
-        ]==])
-        # Provide values for string(CONFIGURE @ONLY) substitution
-        set(VCPKG_QT_TOOLS_BIN "${_vcpkg_qt_tools_bin}")
-        set(VCPKG_BIN_DIR "${_vcpkg_bin_dir}")
-        set(WINDEPLOYQT_EXE "${WINDEPLOYQT_EXE}")
-        set(PROGNAME "${PROGNAME}")
-        string(CONFIGURE "${_wdq_install_code}" _wdq_install_code @ONLY)
-        install(CODE "${_wdq_install_code}" COMPONENT Runtime)
-
-        # Copy all runtime DLLs from the vcpkg prefix into the install directory
-        # (includes qrencode.dll, botan-3.dll, argon2.dll, Qt5*.dll, OpenSSL, etc.)
-        install(DIRECTORY "${_vcpkg_bin_dir}/"
-                DESTINATION "."
-                COMPONENT Runtime
-                FILES_MATCHING PATTERN "*.dll")
     endif()
 
     # install CA cert chains
-    find_file(SSL_CA_BUNDLE ca-bundle.crt PATHS "${Qt5_PREFIX}/ssl/certs")
+    find_file(SSL_CA_BUNDLE ca-bundle.crt PATHS "${Qt6_PREFIX}/ssl/certs")
     if(SSL_CA_BUNDLE)
         install(FILES ${SSL_CA_BUNDLE} DESTINATION "ssl/certs")
     else()

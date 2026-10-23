@@ -52,13 +52,8 @@ PasswordWidget::PasswordWidget(QWidget* parent)
 
     setEchoMode(QLineEdit::Password);
 
-    // use a monospace font for the password field
-    QFont passwordFont = Font::fixedFont();
-    passwordFont.setLetterSpacing(QFont::PercentageSpacing, 110);
-    m_ui->passwordEdit->setFont(passwordFont);
-
     // Prevent conflicts with global Mac shortcuts (force Control on all platforms)
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
     constexpr auto modifier = Qt::MetaModifier;
 #else
     constexpr auto modifier = Qt::ControlModifier;
@@ -95,7 +90,12 @@ PasswordWidget::PasswordWidget(QWidget* parent)
     m_ui->qualityProgressBar->setVisible(false);
 
     connect(m_ui->passwordEdit, &QLineEdit::textChanged, this, [this](const QString& pwd) {
-        updatePasswordStrength(pwd);
+        QString resolvedPwd = pwd;
+
+        // Making a request to dereference the password
+        emit requestPlaceholderResolution(pwd, resolvedPwd);
+
+        updatePasswordStrength(resolvedPwd);
         emit textChanged(pwd);
     });
 }
@@ -237,6 +237,16 @@ bool PasswordWidget::eventFilter(QObject* watched, QEvent* event)
     }
     // Continue with normal operations
     return false;
+}
+
+void PasswordWidget::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+
+    // use a monospace font for the password field
+    QFont passwordFont = Font::fixedFont();
+    passwordFont.setLetterSpacing(QFont::PercentageSpacing, 110);
+    m_ui->passwordEdit->setFont(passwordFont);
 }
 
 void PasswordWidget::checkCapslockState()

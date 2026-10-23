@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 KeePassXC Team <team@keepassxc.org>
+ *  Copyright (C) 2025 KeePassXC Team <team@keepassxc.org>
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -20,18 +20,15 @@
 #include "DatabaseOpenWidget.h"
 #include "DatabaseTabWidget.h"
 #include "DatabaseWidget.h"
+#include "GuiTools.h"
 
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
 #include "core/remote/WebDavClient.h"
 #endif
 
 #include <QFileInfo>
 #include <QLayout>
 #include <QShortcut>
-
-#ifdef Q_OS_WIN
-#include <QtPlatformHeaders/QWindowsWindowFunctions>
-#endif
 
 DatabaseOpenDialog::DatabaseOpenDialog(QWidget* parent)
     : QDialog(parent)
@@ -47,9 +44,7 @@ DatabaseOpenDialog::DatabaseOpenDialog(QWidget* parent)
 #endif
     // block input to the main window/application while the dialog is open
     setWindowModality(Qt::ApplicationModal);
-#ifdef Q_OS_WIN
-    QWindowsWindowFunctions::setWindowActivationBehavior(QWindowsWindowFunctions::AlwaysActivateWindow);
-#endif
+
     connect(m_view, &DatabaseOpenWidget::dialogFinished, this, &DatabaseOpenDialog::complete);
 
     m_tabBar->setAutoHide(true);
@@ -70,16 +65,16 @@ DatabaseOpenDialog::DatabaseOpenDialog(QWidget* parent)
 #ifdef Q_OS_MACOS
     dbTabModifier = Qt::ALT;
 #endif
-    auto* shortcut = new QShortcut(Qt::CTRL + Qt::Key_PageUp, this);
+    auto* shortcut = new QShortcut(Qt::CTRL | Qt::Key_PageUp, this);
     shortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(shortcut, &QShortcut::activated, this, [this]() { selectTabOffset(-1); });
-    shortcut = new QShortcut(dbTabModifier + Qt::SHIFT + Qt::Key_Tab, this);
+    shortcut = new QShortcut(dbTabModifier | Qt::SHIFT | Qt::Key_Tab, this);
     shortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(shortcut, &QShortcut::activated, this, [this]() { selectTabOffset(-1); });
-    shortcut = new QShortcut(Qt::CTRL + Qt::Key_PageDown, this);
+    shortcut = new QShortcut(Qt::CTRL | Qt::Key_PageDown, this);
     shortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(shortcut, &QShortcut::activated, this, [this]() { selectTabOffset(1); });
-    shortcut = new QShortcut(dbTabModifier + Qt::Key_Tab, this);
+    shortcut = new QShortcut(dbTabModifier | Qt::Key_Tab, this);
     shortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(shortcut, &QShortcut::activated, this, [this]() { selectTabOffset(1); });
 }
@@ -87,6 +82,9 @@ DatabaseOpenDialog::DatabaseOpenDialog(QWidget* parent)
 void DatabaseOpenDialog::showEvent(QShowEvent* event)
 {
     QDialog::showEvent(event);
+
+    GuiTools::centerWidgetOnActiveScreen(this);
+
     QTimer::singleShot(100, this, [this] {
         if (m_view->isOnQuickUnlockScreen() && !m_view->unlockingDatabase()) {
             m_view->triggerQuickUnlock();
@@ -146,7 +144,7 @@ void DatabaseOpenDialog::tabChanged(int index)
         setTarget(dbWidget, dbWidget->database()->filePath());
     } else {
         // if these list sizes don't match, there's a bug somewhere nearby
-        qWarning("DatabaseOpenDialog: mismatch between tab count %d and DB count %d",
+        qWarning("DatabaseOpenDialog: mismatch between tab count %d and DB count %" PRIdQSIZETYPE "",
                  m_tabBar->count(),
                  m_tabDbWidgets.count());
     }
@@ -166,7 +164,7 @@ void DatabaseOpenDialog::setTarget(DatabaseWidget* dbWidget, const QString& file
     m_currentDbWidget = dbWidget;
 
     Database::RemoteFileConfig remote = dbWidget->database()->remoteFileConfig();
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     if (dbWidget->database()->hasRemoteFile()) {
         auto* tabs = qobject_cast<DatabaseTabWidget*>(parent());
         if (!tabs) {

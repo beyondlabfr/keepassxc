@@ -282,6 +282,18 @@
         <source>Custom</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>None</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restart KeePassXC to apply the Auto-Type desktop portals preference.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This setting is managed by your organization.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>ApplicationSettingsWidgetGeneral</name>
@@ -616,6 +628,46 @@
         <source>Auto-generate password for new entries</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Keep remote desktop connection open after performing Auto-Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remote desktop mode:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Never remember session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remember session until exit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remember session until revoked by desktop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>None</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use remote desktop for clipboard access</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Experimental: Prefer desktop portals (Wayland implementation)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show autocomplete suggestions for username and additional attributes</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>ApplicationSettingsWidgetSecurity</name>
@@ -807,6 +859,17 @@
     </message>
     <message>
         <source>Sequence</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AutoTypePlatformWayland</name>
+    <message>
+        <source>No symbol found for key: &apos;%1&apos;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No symbol found for character: &apos;%1&apos;</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -1788,15 +1851,15 @@ Are you sure you want to continue with this file?.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;a href=&quot;#&quot; style=&quot;text-decoration: underline&quot;&gt;I have a key file&lt;/a&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Hardware keys found, but no slots are configured.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Press ESC again to close this database</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>I have a key file</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -4653,6 +4716,25 @@ This will leave your passwords and sensitive information vulnerable!
     </message>
 </context>
 <context>
+    <name>GlobalShortcutsPortal</name>
+    <message>
+        <source>KeePassXC - Global Shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The XDG Desktop Portal for global shortcuts is not available on this system.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Global Auto-Type shortcut is already configured. To change it, open your system settings and navigate to the keyboard or application shortcuts section.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Trigger global Auto-Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>Group</name>
     <message>
         <source>[empty]</source>
@@ -6034,17 +6116,6 @@ Are you sure you want to continue with this file?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>WARNING: You are using an unstable build of KeePassXC.
-There is a high risk of corruption, maintain a backup of your databases.
-This version is not meant for production use.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>NOTE: You are using a pre-release version of KeePassXC.
-Expect some bugs and minor issues, this version is meant for testing purposes.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>No Tags</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6387,7 +6458,9 @@ Expect some bugs and minor issues, this version is meant for testing purposes.</
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Password Generator</source>
+        <source>WARNING: You are using a development snapshot build of KeePassXC.
+Maintain a backup of your databases in the event of unknown bugs.
+This version is not meant for production use.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6400,6 +6473,10 @@ Expect some bugs and minor issues, this version is meant for testing purposes.</
     </message>
     <message>
         <source>New Entry</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Password Generator</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7543,6 +7620,10 @@ Do you want to overwrite it?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Username or password cannot contain references</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Unknown error</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8092,6 +8173,14 @@ Do you want to overwrite it?</source>
     </message>
     <message>
         <source>Average password length</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Number of passkeys</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Entries with TOTP setup</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -8749,19 +8838,11 @@ Kernel: %3 %4</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>YubiKey</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Quick Unlock</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Secret Service Integration</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>None</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -9317,6 +9398,14 @@ This option is deprecated, use --set-key-file instead.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Hardware Keys</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Passkey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Reset Shortcuts</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9337,23 +9426,7 @@ This option is deprecated, use --set-key-file instead.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Encrypted files are not supported.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Proton Pass Import</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Passkey</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Format to use when exporting. Available choices are &apos;xml&apos;, &apos;csv&apos; or &apos;html&apos;. Defaults to &apos;xml&apos;.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>start minimized to the system tray</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -9369,7 +9442,19 @@ This option is deprecated, use --set-key-file instead.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Encrypted files are not supported.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Proton Pass Import</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Tags</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>start minimized to the system tray</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -9465,6 +9550,29 @@ This option is deprecated, use --set-key-file instead.</source>
     </message>
     <message>
         <source>Internal zlib error: </source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>RemoteDesktopPortal</name>
+    <message>
+        <source>Remote desktop session is not active</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Session closed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User cancelled the interaction</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User interaction was canceled for unknown reason</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remote desktop session handle does not match expected path</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -9979,6 +10087,14 @@ This option is deprecated, use --set-key-file instead.</source>
     </message>
     <message>
         <source>Average password length is less than ten characters. Longer passwords provide more security.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Number of passkeys</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Entries with TOTP setup</source>
         <translation type="unfinished"></translation>
     </message>
     <message numerus="yes">

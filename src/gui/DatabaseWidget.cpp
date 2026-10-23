@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 KeePassXC Team <team@keepassxc.org>
+ * Copyright (C) 2026 KeePassXC Team <team@keepassxc.org>
  * Copyright (C) 2010 Felix Geyer <debfx@fobos.de>
  *
  * This program is free software: you can redistribute it and/or modify
@@ -60,24 +60,24 @@
 #include "remote/RemoteHandler.h"
 #include "remote/RemoteSettings.h"
 
-#ifdef WITH_XC_NETWORKING
+#ifdef KPXC_FEATURE_NETWORK
 #include "gui/IconDownloaderDialog.h"
 #endif
 
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
 #include "sshagent/SSHAgent.h"
 #endif
 
-#ifdef WITH_XC_BROWSER_PASSKEYS
+#ifdef KPXC_FEATURE_BROWSER
 #include "gui/passkeys/PasskeyImporter.h"
 #endif
 
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
 #include "core/remote/WebDavClient.h"
 #include "gui/DatabaseTabWidget.h"
 #endif
 
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
 static DatabaseTabWidget* findParentTabWidget(const QWidget* widget)
 {
     for (QWidget* p = widget ? widget->parentWidget() : nullptr; p; p = p->parentWidget()) {
@@ -142,7 +142,7 @@ DatabaseWidget::DatabaseWidget(QSharedPointer<Database> db, QWidget* parent)
     tagsWidget->setLayout(tagsLayout);
     tagsLayout->addWidget(tagsTitle);
     tagsLayout->addWidget(m_tagView);
-    tagsLayout->setMargin(0);
+    tagsLayout->setContentsMargins(0, 0, 0, 0);
 
     m_groupSplitter->setOrientation(Qt::Vertical);
     m_groupSplitter->setChildrenCollapsible(true);
@@ -156,11 +156,9 @@ DatabaseWidget::DatabaseWidget(QSharedPointer<Database> db, QWidget* parent)
 
     auto rightHandSideWidget = new QWidget(m_mainSplitter);
     auto rightHandSideVBox = new QVBoxLayout();
-    rightHandSideVBox->setMargin(0);
+    rightHandSideVBox->setContentsMargins(0, 0, 0, 0);
     rightHandSideVBox->addWidget(m_searchingLabel);
-#ifdef WITH_XC_KEESHARE
     rightHandSideVBox->addWidget(m_shareLabel);
-#endif
     rightHandSideVBox->addWidget(m_previewSplitter);
     rightHandSideWidget->setLayout(rightHandSideVBox);
     m_entryView = new EntryView(rightHandSideWidget);
@@ -190,12 +188,10 @@ DatabaseWidget::DatabaseWidget(QSharedPointer<Database> db, QWidget* parent)
     m_searchingLabel->setAlignment(Qt::AlignCenter);
     m_searchingLabel->setVisible(false);
 
-#ifdef WITH_XC_KEESHARE
     m_shareLabel->setObjectName("KeeShareBanner");
     m_shareLabel->setRawText(tr("Shared group…"));
     m_shareLabel->setAlignment(Qt::AlignCenter);
     m_shareLabel->setVisible(false);
-#endif
 
     m_previewView->setObjectName("previewWidget");
     m_previewView->hide();
@@ -256,11 +252,9 @@ DatabaseWidget::DatabaseWidget(QSharedPointer<Database> db, QWidget* parent)
 
     m_searchLimitGroup = config()->get(Config::SearchLimitGroup).toBool();
 
-#ifdef WITH_XC_KEESHARE
     // We need to reregister the database to allow exports
     // from a newly created database
     KeeShare::instance()->connectDatabase(m_db, {});
-#endif
 
     if (m_db->isInitialized()) {
         switchToMainView();
@@ -531,12 +525,7 @@ void DatabaseWidget::replaceDatabase(QSharedPointer<Database> db)
 
     emit databaseReplaced(oldDb, m_db);
 
-#if defined(WITH_XC_KEESHARE)
     KeeShare::instance()->connectDatabase(m_db, oldDb);
-#else
-    // Keep the instance active till the end of this function
-    Q_UNUSED(oldDb);
-#endif
 
     oldDb->releaseData();
 }
@@ -619,6 +608,11 @@ void DatabaseWidget::expireSelectedEntries()
 
 void DatabaseWidget::deleteSelectedEntries()
 {
+    // Prevent deletion when a modal dialog (e.g., file save dialog) is active
+    if (QApplication::activeModalWidget()) {
+        return;
+    }
+
     const QModelIndexList selected = m_entryView->selectionModel()->selectedRows();
     if (selected.isEmpty()) {
         return;
@@ -854,7 +848,7 @@ void DatabaseWidget::setClipboardTextAndMinimize(const QString& text)
     }
 }
 
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
 void DatabaseWidget::addToAgent()
 {
     Entry* currentEntry = m_entryView->currentEntry();
@@ -975,7 +969,7 @@ void DatabaseWidget::openUrl()
 
 void DatabaseWidget::downloadSelectedFavicons()
 {
-#ifdef WITH_XC_NETWORKING
+#ifdef KPXC_FEATURE_NETWORK
     QList<Entry*> selectedEntries;
     for (const auto& index : m_entryView->selectionModel()->selectedRows()) {
         selectedEntries.append(m_entryView->entryFromIndex(index));
@@ -988,7 +982,7 @@ void DatabaseWidget::downloadSelectedFavicons()
 
 void DatabaseWidget::downloadAllFavicons()
 {
-#ifdef WITH_XC_NETWORKING
+#ifdef KPXC_FEATURE_NETWORK
     auto currentGroup = m_groupView->currentGroup();
     if (currentGroup) {
         performIconDownloads(currentGroup->entries());
@@ -998,7 +992,7 @@ void DatabaseWidget::downloadAllFavicons()
 
 void DatabaseWidget::downloadFaviconInBackground(Entry* entry)
 {
-#ifdef WITH_XC_NETWORKING
+#ifdef KPXC_FEATURE_NETWORK
     performIconDownloads({entry}, true, true);
 #else
     Q_UNUSED(entry);
@@ -1007,7 +1001,7 @@ void DatabaseWidget::downloadFaviconInBackground(Entry* entry)
 
 void DatabaseWidget::performIconDownloads(const QList<Entry*>& entries, bool force, bool downloadInBackground)
 {
-#ifdef WITH_XC_NETWORKING
+#ifdef KPXC_FEATURE_NETWORK
     auto* iconDownloaderDialog = new IconDownloaderDialog(this);
     connect(this, SIGNAL(databaseLockRequested()), iconDownloaderDialog, SLOT(close()));
 
@@ -1037,7 +1031,8 @@ void DatabaseWidget::openUrlForEntry(Entry* entry)
 
         // otherwise ask user
         if (!launch && cmdString.length() > 6) {
-            QString cmdTruncated = entry->resolveMultiplePlaceholders(entry->maskPasswordPlaceholders(entry->url()));
+            QString cmdTruncated =
+                entry->resolveMultiplePlaceholders(EntryPlaceholders::maskPasswordPlaceholders(entry->url()));
             cmdTruncated = cmdTruncated.mid(6);
             if (cmdTruncated.length() > 400) {
                 cmdTruncated = cmdTruncated.left(400) + " […]";
@@ -1053,11 +1048,7 @@ void DatabaseWidget::openUrlForEntry(Entry* entry)
             auto checkbox = new QCheckBox(tr("Remember my choice"), &msgbox);
             msgbox.setCheckBox(checkbox);
             bool remember = false;
-            QObject::connect(checkbox, &QCheckBox::stateChanged, [&](int state) {
-                if (static_cast<Qt::CheckState>(state) == Qt::CheckState::Checked) {
-                    remember = true;
-                }
-            });
+            QObject::connect(checkbox, &QCheckBox::toggled, [&](bool checked) { remember = checked; });
 
             int result = msgbox.exec();
             launch = (result == QMessageBox::Yes);
@@ -1069,15 +1060,11 @@ void DatabaseWidget::openUrlForEntry(Entry* entry)
 
         if (launch) {
             const QString cmd = cmdString.mid(6);
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
             QStringList cmdList = QProcess::splitCommand(cmd);
             if (!cmdList.isEmpty()) {
                 const QString program = cmdList.takeFirst();
                 QProcess::startDetached(program, cmdList);
             }
-#else
-            QProcess::startDetached(cmd);
-#endif
 
             if (config()->get(Config::MinimizeOnOpenUrl).toBool()) {
                 getMainWindow()->minimizeOrHide();
@@ -1138,6 +1125,11 @@ void DatabaseWidget::cloneGroup()
 
 void DatabaseWidget::deleteGroup()
 {
+    // Prevent deletion when a modal dialog is active
+    if (QApplication::activeModalWidget()) {
+        return;
+    }
+
     Group* currentGroup = m_groupView->currentGroup();
     Q_ASSERT(currentGroup && canDeleteCurrentGroup());
     if (!currentGroup || !canDeleteCurrentGroup()) {
@@ -1383,7 +1375,7 @@ void DatabaseWidget::loadDatabase(bool accepted)
         m_entryBeforeLock = QUuid();
         m_saveAttempts = 0;
         emit databaseUnlocked();
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
         sshAgent()->databaseUnlocked(m_db);
 #endif
         if (config()->get(Config::MinimizeAfterUnlock).toBool()) {
@@ -1546,7 +1538,7 @@ void DatabaseWidget::unlockDatabase(bool accepted)
     processAutoOpen();
     emit databaseUnlocked();
 
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
     sshAgent()->databaseUnlocked(m_db);
 #endif
 
@@ -1642,7 +1634,7 @@ void DatabaseWidget::switchToDatabaseSettings()
     }
 }
 
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
 Database::RemoteFileConfig DatabaseWidget::resolveWebDavCredentials(const QString& filePath) const
 {
     Database::RemoteFileConfig remote = m_db->remoteFileConfig();
@@ -1686,7 +1678,7 @@ void DatabaseWidget::switchToOpenDatabase()
 void DatabaseWidget::switchToOpenDatabase(const QString& filePath)
 {
     Database::RemoteFileConfig remote = m_db->remoteFileConfig();
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     if (m_db->hasRemoteFile()) {
         remote = resolveWebDavCredentials(filePath);
     }
@@ -1743,7 +1735,7 @@ void DatabaseWidget::switchToRemoteSettings()
     m_databaseSettingDialog->showRemoteSettings();
 }
 
-#ifdef WITH_XC_BROWSER_PASSKEYS
+#ifdef KPXC_FEATURE_BROWSER
 void DatabaseWidget::switchToPasskeys()
 {
     switchToDatabaseReports();
@@ -1840,9 +1832,7 @@ void DatabaseWidget::search(const QString& searchtext)
     m_lastSearchText = searchtext;
 
     m_searchingLabel->setVisible(true);
-#ifdef WITH_XC_KEESHARE
     m_shareLabel->setVisible(false);
-#endif
 
     emit searchModeActivated();
 }
@@ -1907,7 +1897,6 @@ void DatabaseWidget::onGroupChanged()
 
     m_previewView->setGroup(group);
 
-#ifdef WITH_XC_KEESHARE
     auto shareLabel = KeeShare::sharingLabel(group);
     if (!shareLabel.isEmpty()) {
         m_shareLabel->setRawText(shareLabel);
@@ -1915,7 +1904,6 @@ void DatabaseWidget::onGroupChanged()
     } else {
         m_shareLabel->setVisible(false);
     }
-#endif
 
     emit groupChanged();
 }
@@ -2155,6 +2143,7 @@ bool DatabaseWidget::lock()
                 QApplication::processEvents();
                 disconnect(connection);
                 if (reloadTriggered) {
+                    m_attemptingLock = false;
                     return false;
                 }
             }
@@ -2199,7 +2188,7 @@ bool DatabaseWidget::lock()
         m_entryBeforeLock = currentEntry->uuid();
     }
 
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
     sshAgent()->databaseLocked(m_db);
 #endif
 
@@ -2209,7 +2198,7 @@ bool DatabaseWidget::lock()
 
     auto newDb = QSharedPointer<Database>::create(m_db->filePath());
     if (m_db->hasRemoteFile()) {
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
         newDb->setRemoteFileConfig(resolveWebDavCredentials(m_db->filePath()));
 #else
         newDb->setRemoteFileConfig(m_db->remoteFileConfig());
@@ -2323,7 +2312,7 @@ void DatabaseWidget::reloadDatabaseFile(bool triggeredBySave)
 
     auto db = QSharedPointer<Database>::create(m_db->filePath());
     if (m_db->hasRemoteFile()) {
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
         db->setRemoteFileConfig(resolveWebDavCredentials(m_db->filePath()));
 #else
         db->setRemoteFileConfig(m_db->remoteFileConfig());
@@ -2512,7 +2501,7 @@ bool DatabaseWidget::currentEntryHasTotp()
     return currentEntry->hasValidTotp();
 }
 
-#ifdef WITH_XC_SSHAGENT
+#ifdef KPXC_FEATURE_SSHAGENT
 bool DatabaseWidget::currentEntryHasSshKey()
 {
     Entry* currentEntry = m_entryView->currentEntry();
@@ -2525,7 +2514,7 @@ bool DatabaseWidget::currentEntryHasSshKey()
 }
 #endif
 
-#ifdef WITH_XC_BROWSER_PASSKEYS
+#ifdef KPXC_FEATURE_BROWSER
 bool DatabaseWidget::currentEntryHasPasskey()
 {
     auto currentEntry = m_entryView->currentEntry();

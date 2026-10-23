@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2024 KeePassXC Team <team@keepassxc.org>
+ *  Copyright (C) 2026 KeePassXC Team <team@keepassxc.org>
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -75,7 +75,7 @@ DatabaseTabWidget::DatabaseTabWidget(QWidget* parent)
     m_lockDelayTimer.setSingleShot(true);
     connect(&m_lockDelayTimer, &QTimer::timeout, this, [this] { lockDatabases(); });
 
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     loadWebDavCredentials();
 #endif
 }
@@ -154,7 +154,7 @@ void DatabaseTabWidget::openDatabase()
 
 void DatabaseTabWidget::openWebDavDatabase()
 {
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     WebDavOpenDialog dialog(this);
     Database::RemoteFileConfig initial;
     initial.type = Database::RemoteFileConfig::Type::WebDav;
@@ -196,7 +196,7 @@ void DatabaseTabWidget::addDatabaseTab(const QString& filePath,
                                        const QString& password,
                                        const QString& keyfile)
 {
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     QUrl remoteUrl(filePath);
     if (remoteUrl.isValid() && WebDavClient::isWebDavScheme(remoteUrl.scheme())) {
         const QString normalized = WebDavClient::normalizePath(remoteUrl);
@@ -274,7 +274,7 @@ void DatabaseTabWidget::addDatabaseTab(const Database::RemoteFileConfig& remoteC
                                        const QString& password,
                                        const QString& keyfile)
 {
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     if (remoteConfig.type != Database::RemoteFileConfig::Type::WebDav || !remoteConfig.url.isValid()) {
         return;
     }
@@ -392,7 +392,7 @@ void DatabaseTabWidget::addDatabaseTab(DatabaseWidget* dbWidget, bool inBackgrou
             &DatabaseTabWidget::unlockDatabaseInDialogForSync);
 }
 
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
 void DatabaseTabWidget::loadWebDavCredentials()
 {
     m_webDavCredentials.clear();
@@ -657,8 +657,27 @@ bool DatabaseTabWidget::closeDatabaseTab(DatabaseWidget* dbWidget)
         return false;
     }
 
+    // Closing may spin a nested event loop (e.g. save-on-close waits for the worker
+    // thread in AsyncTask), from which this method can be re-entered for the same
+    // widget. QWidget::close() would then report success right away without
+    // delivering another close event, and deleting the widget here would leave the
+    // outer invocation operating on a destroyed widget. Let only the outermost
+    // invocation remove the tab and schedule deletion.
+    if (m_widgetsPendingClose.contains(dbWidget)) {
+        return false;
+    }
+
     QString filePath = dbWidget->database()->filePath();
-    if (!dbWidget->close()) {
+    m_widgetsPendingClose.insert(dbWidget);
+    bool closed = dbWidget->close();
+    m_widgetsPendingClose.remove(dbWidget);
+    if (!closed) {
+        return false;
+    }
+
+    // the tab layout may have shifted while nested event loops ran during close
+    tabIndex = indexOf(dbWidget);
+    if (tabIndex < 0) {
         return false;
     }
 
@@ -848,7 +867,7 @@ void DatabaseTabWidget::showDatabaseSecurity()
     currentDatabaseWidget()->switchToDatabaseSecurity();
 }
 
-#ifdef WITH_XC_BROWSER_PASSKEYS
+#ifdef KPXC_FEATURE_BROWSER
 void DatabaseTabWidget::showPasskeys()
 {
     currentDatabaseWidget()->switchToPasskeys();
@@ -1135,7 +1154,7 @@ void DatabaseTabWidget::updateLastDatabases(const QSharedPointer<Database>& data
         return;
     }
     auto filename = database->filePath();
-#ifdef WITH_XC_WEBDAV
+#ifdef KPXC_FEATURE_WEBDAV
     if (!database->hasRemoteFile()) {
         filename = QDir::toNativeSeparators(filename);
     }
