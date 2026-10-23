@@ -43,6 +43,10 @@ public:
     // False when the password was meant to be remembered but the keyring refused it
     bool store(const Database::RemoteFileConfig& config);
     void forget(const QUrl& url);
+    // After the server rejected it: ask again next time, keyring left as is until the user enters a new one
+    void forgetSessionPassword(const QUrl& url);
+    // Moves passwords left in clear in the config by older builds; cheap when there are none
+    void migrateLegacySettings();
 
     // True when a keyring backend is installed (it may still be locked or not running)
     static bool keyringAvailable();

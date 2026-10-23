@@ -110,6 +110,7 @@ private:
     bool performSave(const QString& filePath, SaveAction flags, const QString& backupFilePath, QString* error);
 #ifdef KPXC_FEATURE_WEBDAV
     RemoteFileConfig resolveRemoteConfig(const QString& filePath) const;
+    void forgetRejectedPassword(int status, const RemoteFileConfig& remote);
     bool openFromWebDav(const QString& filePath, QSharedPointer<const CompositeKey> key, QString* error);
     bool saveToWebDav(const QString& filePath, SaveAction action, QString* error);
 #endif

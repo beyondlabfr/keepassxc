@@ -32,6 +32,10 @@
 #include "gui/MessageBox.h"
 #include "gui/osutils/OSUtils.h"
 
+#ifdef KPXC_FEATURE_WEBDAV
+#include "core/remote/WebDavClient.h"
+#endif
+
 #if defined(WITH_ASAN) && defined(WITH_LSAN)
 #include <sanitizer/lsan_interface.h>
 #endif
@@ -144,6 +148,12 @@ int main(int argc, char** argv)
 #ifdef Q_OS_WIN
     // Get correct case for Windows filenames (fixes #7139)
     for (const auto& file : parser.positionalArguments()) {
+#ifdef KPXC_FEATURE_WEBDAV
+        if (WebDavClient::isWebDavUrl(file)) {
+            fileNames << file;
+            continue;
+        }
+#endif
         const auto fileInfo = QFileInfo(file);
         WIN32_FIND_DATAW findFileData;
         HANDLE hFind;
@@ -156,6 +166,12 @@ int main(int argc, char** argv)
     }
 #else
     for (const auto& file : parser.positionalArguments()) {
+#ifdef KPXC_FEATURE_WEBDAV
+        if (WebDavClient::isWebDavUrl(file)) {
+            fileNames << file;
+            continue;
+        }
+#endif
         if (QFile::exists(file)) {
             fileNames << QDir::toNativeSeparators(file);
         }

@@ -97,8 +97,8 @@ DatabaseWidget::DatabaseWidget(QSharedPointer<Database> db, QWidget* parent)
 {
     Q_ASSERT(m_db);
 
-    // Read public headers if the database hasn't been opened yet
-    if (!m_db->isInitialized()) {
+    // Read public headers if the database hasn't been opened yet (the unlock screen does it for WebDAV)
+    if (!m_db->isInitialized() && !m_db->hasRemoteFile()) {
         m_db->open(nullptr);
     }
 
@@ -2525,7 +2525,8 @@ bool DatabaseWidget::save()
         return true;
     }
 
-    if (m_saveAttempts > 2 && config()->get(Config::UseAtomicSaves).toBool()) {
+    // Not for WebDAV: failures there come from the network, not from a file sync service
+    if (m_saveAttempts > 2 && config()->get(Config::UseAtomicSaves).toBool() && !m_db->hasRemoteFile()) {
         // Saving failed 3 times, issue a warning and attempt to resolve
         auto result = MessageBox::question(this,
                                            tr("Disable safe saves?"),

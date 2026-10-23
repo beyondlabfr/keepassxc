@@ -152,6 +152,19 @@ void WebDavCredentials::forget(const QUrl& url)
     }
 }
 
+void WebDavCredentials::forgetSessionPassword(const QUrl& url)
+{
+    auto it = m_session.find(keyFor(url));
+    if (it != m_session.end()) {
+        it->password.clear();
+    }
+}
+
+void WebDavCredentials::migrateLegacySettings()
+{
+    loadSettings();
+}
+
 void WebDavCredentials::loadSettings()
 {
     using Remember = Database::RemoteFileConfig::Remember;

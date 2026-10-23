@@ -134,8 +134,8 @@ WebDavClient::Response WebDavClient::sendWithRetry(const QByteArray& method, con
             pause(kRetryDelayMsec * attempt);
         }
         response = send(method, options);
-        // Only retry what may be transient: no answer at all, or a server-side error
-        if (response.ok() || (response.status != 0 && response.status < 500)) {
+        // Only retry server-side errors: after a timeout, retrying would freeze KeePassXC several times as long
+        if (response.status < 500) {
             break;
         }
     }
@@ -195,9 +195,13 @@ QString WebDavClient::describeFailure(QNetworkReply* reply, int status, const Re
     // Check the HTTP status before reply->error(): Qt reports 401/403 as AuthenticationRequiredError
     if (status == 401 || status == 403) {
         if (!options.useAuthentication || options.username.isEmpty() || options.password.isEmpty()) {
-            return tr("WebDAV: the server requires a user name and password (HTTP %1).").arg(status);
+            return tr("WebDAV: the server requires a user name and password (HTTP %1). Open the database "
+                      "again to enter them.")
+                .arg(status);
         }
-        return tr("WebDAV: the server rejected the user name or password (HTTP %1).").arg(status);
+        return tr("WebDAV: the server rejected the user name or password (HTTP %1). Open the database "
+                  "again to enter them.")
+            .arg(status);
     }
     if (status >= 300 && status < 400) {
         const auto location = reply->rawHeader("Location");

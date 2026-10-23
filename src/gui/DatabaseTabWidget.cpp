@@ -74,6 +74,11 @@ DatabaseTabWidget::DatabaseTabWidget(QWidget* parent)
 
     m_lockDelayTimer.setSingleShot(true);
     connect(&m_lockDelayTimer, &QTimer::timeout, this, [this] { lockDatabases(); });
+
+#ifdef KPXC_FEATURE_WEBDAV
+    // Do not leave WebDAV passwords of older builds in clear in the config until WebDAV is used
+    WebDavCredentials::instance()->migrateLegacySettings();
+#endif
 }
 
 DatabaseTabWidget::~DatabaseTabWidget() = default;

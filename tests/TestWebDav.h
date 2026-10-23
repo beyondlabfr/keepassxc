@@ -49,6 +49,9 @@ private slots:
     void testRedirectReported();
     void testSaveAsLocalFile();
     void testBackupKeepsServer();
+    void testUnchangedContentIsNoConflict();
+    void testTruncatedServerFileOverwritten();
+    void testRejectedPasswordAskedAgain();
 
 private:
     QString urlFor(const QString& area) const;

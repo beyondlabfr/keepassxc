@@ -375,3 +375,74 @@ void TestWebDav::testBackupKeepsServer()
     QVERIFY2(onServer, qPrintable(error));
     QCOMPARE(onServer->metadata()->name(), QString("after backup"));
 }
+
+static WebDavClient::RequestOptions optionsFor(const QString& url, const QString& user, const QString& password)
+{
+    WebDavClient::RequestOptions options;
+    options.url = QUrl(url);
+    options.useAuthentication = true;
+    options.username = user;
+    options.password = password;
+    return options;
+}
+
+void TestWebDav::testUnchangedContentIsNoConflict()
+{
+    // A new ETag with the same content (touch, restore, server-side copy) must not block saving:
+    // the reload that would follow sees no change and would never prompt
+    const auto url = urlFor("dav");
+    WebDavCredentials::instance()->store(remoteFor(url, m_password));
+
+    QString error;
+    auto db = newDatabase("touched");
+    QVERIFY2(db->saveAs(url, Database::Atomic, {}, &error), qPrintable(error));
+
+    WebDavClient client;
+    const auto options = optionsFor(url, m_username, m_password);
+    const auto content = client.get(options);
+    QVERIFY(content.ok());
+    QTest::qWait(1100);
+    QVERIFY(client.put(options, content.body).ok());
+
+    db->metadata()->setName("after touch");
+    QVERIFY2(db->save(Database::Atomic, {}, &error), qPrintable(error));
+}
+
+void TestWebDav::testTruncatedServerFileOverwritten()
+{
+    // Not a database any more: overwrite it, as for a local file, instead of a conflict nobody can resolve
+    const auto url = urlFor("noetag");
+    WebDavCredentials::instance()->store(remoteFor(url, m_password));
+
+    QString error;
+    auto db = newDatabase("repaired");
+    QVERIFY2(db->saveAs(url, Database::Atomic, {}, &error), qPrintable(error));
+
+    WebDavClient client;
+    QVERIFY(client.put(optionsFor(url, m_username, m_password), "x").ok());
+
+    db->metadata()->setName("repaired");
+    QVERIFY2(db->save(Database::Atomic, {}, &error), qPrintable(error));
+    auto onServer = openDatabase(url, &error);
+    QVERIFY2(onServer, qPrintable(error));
+    QCOMPARE(onServer->metadata()->name(), QString("repaired"));
+}
+
+void TestWebDav::testRejectedPasswordAskedAgain()
+{
+    const auto url = urlFor("dav");
+    auto remote = remoteFor(url, "not the password");
+    remote.remember = Remember::UserName;
+    WebDavCredentials::instance()->store(remote);
+
+    QString error;
+    QVERIFY(!openDatabase(url, &error));
+
+    // The user name stays, the rejected password is gone so that the dialog shows up again
+    Database::RemoteFileConfig known;
+    QVERIFY(WebDavCredentials::instance()->lookup(QUrl(url), known));
+    QCOMPARE(known.username, m_username);
+    QVERIFY(known.password.isEmpty());
+
+    WebDavCredentials::instance()->forget(QUrl(url));
+}

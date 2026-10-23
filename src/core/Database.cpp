@@ -37,6 +37,7 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QTemporaryFile>
 #include <QTimer>
 
@@ -250,15 +251,13 @@ Database::RemoteFileConfig Database::resolveRemoteConfig(const QString& filePath
     const auto url = WebDavClient::sanitizeUrl(QUrl(filePath));
     const auto key = WebDavClient::normalizePath(url);
 
-    RemoteFileConfig remote = m_data.remoteFile;
-    const bool matches =
-        remote.type == RemoteFileConfig::Type::WebDav && WebDavClient::normalizePath(remote.url) == key;
-    if (!matches || (remote.useAuthentication && remote.password.isEmpty())) {
-        RemoteFileConfig stored;
-        if (WebDavCredentials::instance()->lookup(url, stored)) {
-            remote = stored;
-        } else if (!matches) {
-            remote = RemoteFileConfig();
+    // The credential store holds the latest input of the user for this URL, so it comes first
+    RemoteFileConfig remote;
+    if (!WebDavCredentials::instance()->lookup(url, remote)) {
+        const bool matches = m_data.remoteFile.type == RemoteFileConfig::Type::WebDav
+                             && WebDavClient::normalizePath(m_data.remoteFile.url) == key;
+        if (matches) {
+            remote = m_data.remoteFile;
         }
     }
     remote.type = RemoteFileConfig::Type::WebDav;
@@ -276,6 +275,7 @@ bool Database::openFromWebDav(const QString& filePath, QSharedPointer<const Comp
         if (error) {
             *error = response.error;
         }
+        forgetRejectedPassword(response.status, remote);
         return false;
     }
 
@@ -304,6 +304,16 @@ bool Database::openFromWebDav(const QString& filePath, QSharedPointer<const Comp
     setEmitModified(true);
 
     return true;
+}
+
+/**
+ * A rejected password is dropped for the session, so that opening the database again asks for it
+ */
+void Database::forgetRejectedPassword(int status, const RemoteFileConfig& remote)
+{
+    if ((status == 401 || status == 403) && remote.useAuthentication && !remote.password.isEmpty()) {
+        WebDavCredentials::instance()->forgetSessionPassword(remote.url);
+    }
 }
 
 /**
@@ -358,6 +368,17 @@ bool Database::saveToWebDav(const QString& filePath, SaveAction action, QString*
         return false;
     };
 
+    // Prevent destructive operations while saving. Taken before the first request: the requests run
+    // nested event loops, during which a lock or a reload must see that a save is in progress. A save
+    // started from one of those loops is refused instead of deadlocking on the mutex.
+    if (!m_saveMutex.tryLock()) {
+        if (error) {
+            *error = tr("Another save of this database is in progress.");
+        }
+        return false;
+    }
+    auto unlockSave = qScopeGuard([this] { m_saveMutex.unlock(); });
+
     WebDavClient client;
 
     // Make sure we don't overwrite external modifications unless explicitly allowed
@@ -370,13 +391,13 @@ bool Database::saveToWebDav(const QString& filePath, SaveAction action, QString*
             if (error) {
                 *error = current.error;
             }
+            forgetRejectedPassword(current.status, remote);
             return false;
-        } else if (WebDavClient::isStrongETag(m_remoteETag) && !current.etag.isEmpty()) {
-            if (current.etag != m_remoteETag) {
-                return unmergedChanges();
-            }
+        } else if (WebDavClient::isStrongETag(m_remoteETag) && current.etag == m_remoteETag) {
             ifMatch = m_remoteETag;
         } else {
+            // No usable ETag, or a different one: let the content decide, as the reload that follows does,
+            // otherwise a mere touch on the server would raise a conflict that the reload then ignores
             const auto content = client.get(options);
             if (!content.ok()) {
                 if (error) {
@@ -384,8 +405,13 @@ bool Database::saveToWebDav(const QString& filePath, SaveAction action, QString*
                 }
                 return false;
             }
-            if (firstBlockHash(content.body, kFileBlockToHashSizeBytes) != m_fileBlockHash) {
+            const auto hash = firstBlockHash(content.body, kFileBlockToHashSizeBytes);
+            // Shorter than one block is not a database: overwrite it, as Database::saveAs does for local files
+            if (!hash.isEmpty() && hash != m_fileBlockHash) {
                 return unmergedChanges();
+            }
+            if (WebDavClient::isStrongETag(content.etag)) {
+                ifMatch = content.etag;
             }
         }
     }
@@ -393,9 +419,6 @@ bool Database::saveToWebDav(const QString& filePath, SaveAction action, QString*
     // Add random data to prevent side-channel data deduplication attacks
     int length = Random::instance()->randomUIntRange(64, 512);
     m_metadata->customData()->set(CustomData::RandomSlug, Random::instance()->randomArray(length).toHex());
-
-    // Prevent destructive operations while saving
-    QMutexLocker locker(&m_saveMutex);
 
     QBuffer buffer;
     buffer.open(QIODevice::WriteOnly);
@@ -405,6 +428,9 @@ bool Database::saveToWebDav(const QString& filePath, SaveAction action, QString*
         return false;
     }
     hashingStream.close();
+
+    // Anything modified from now on (browser integration, Secret Service clients) is not in the upload
+    m_modified = false;
 
     WebDavClient::Response written;
     if (action != DirectWrite) {
@@ -432,6 +458,7 @@ bool Database::saveToWebDav(const QString& filePath, SaveAction action, QString*
             if (error) {
                 *error = written.error;
             }
+            forgetRejectedPassword(written.status, remote);
             markAsModified();
             return false;
         }
@@ -446,7 +473,13 @@ bool Database::saveToWebDav(const QString& filePath, SaveAction action, QString*
 
     setRemoteFileConfig(remote);
     setFilePath(WebDavClient::normalizePath(remote.url));
-    markAsClean();
+    if (m_modified) {
+        // Changed during the upload: keep it marked as unsaved so it is saved again
+        markAsModified();
+    } else {
+        m_modified = true; // so that markAsClean() reports the save
+        markAsClean();
+    }
     m_ignoreFileChangesUntilSaved = false;
 
     return true;
