@@ -67,24 +67,17 @@
       </widget>
      </item>
      <item row="4" column="0">
-      <spacer name="rememberSpacer">
-       <property name="orientation">
-        <enum>Qt::Vertical</enum>
-       </property>
-       <property name="sizeHint" stdset="0">
-        <size>
-         <width>20</width>
-         <height>10</height>
-        </size>
-       </property>
-      </spacer>
-     </item>
-     <item row="4" column="1">
-      <widget class="QCheckBox" name="rememberCheckBox">
+      <widget class="QLabel" name="rememberLabel">
        <property name="text">
-        <string>Remember credentials</string>
+        <string>Remember</string>
+       </property>
+       <property name="buddy">
+        <cstring>rememberComboBox</cstring>
        </property>
       </widget>
+     </item>
+     <item row="4" column="1">
+      <widget class="QComboBox" name="rememberComboBox"/>
      </item>
      <item row="5" column="0">
       <widget class="QLabel" name="timeoutLabel">
@@ -107,6 +100,13 @@
       </widget>
      </item>
     </layout>
+   </item>
+   <item>
+    <widget class="QLabel" name="warningLabel">
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
    </item>
    <item>
     <widget class="QDialogButtonBox" name="buttonBox">

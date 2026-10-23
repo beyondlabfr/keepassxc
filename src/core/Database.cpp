@@ -28,8 +28,8 @@
 #include "streams/HashingStream.h"
 
 #ifdef KPXC_FEATURE_WEBDAV
-#include "core/Config.h"
 #include "core/remote/WebDavClient.h"
+#include "core/remote/WebDavCredentials.h"
 #endif
 
 #include <QBuffer>
@@ -137,9 +137,7 @@ bool Database::open(QSharedPointer<const CompositeKey> key, QString* error)
 bool Database::open(const QString& filePath, QSharedPointer<const CompositeKey> key, QString* error)
 {
 #ifdef KPXC_FEATURE_WEBDAV
-    QUrl urlCandidate(filePath);
-    if (hasRemoteFile()
-        || (urlCandidate.isValid() && WebDavClient::isWebDavScheme(urlCandidate.scheme()))) {
+    if (WebDavClient::isWebDavUrl(filePath)) {
         return openFromWebDav(filePath, std::move(key), error);
     }
 #endif
@@ -177,9 +175,9 @@ bool Database::open(const QString& filePath, QSharedPointer<const CompositeKey> 
 
     // update the hash of the first block
     m_fileBlockHash.clear();
-    auto fileBlockData = dbFile.peek(static_cast<int>(kFileBlockToHashSizeBytes));
-    if (static_cast<quint32>(fileBlockData.size()) != kFileBlockToHashSizeBytes) {
-        if (dbFile.size() >= static_cast<qint64>(kFileBlockToHashSizeBytes)) {
+    auto fileBlockData = dbFile.peek(kFileBlockToHashSizeBytes);
+    if (fileBlockData.size() != kFileBlockToHashSizeBytes) {
+        if (dbFile.size() >= kFileBlockToHashSizeBytes) {
             if (error) {
                 *error = tr("Database file read error.");
             }
@@ -210,98 +208,84 @@ bool Database::open(const QString& filePath, QSharedPointer<const CompositeKey> 
 }
 
 #ifdef KPXC_FEATURE_WEBDAV
+namespace
+{
+    // Same fingerprint as for local files, see Database::open()
+    QByteArray firstBlockHash(const QByteArray& data, quint32 blockSize)
+    {
+        if (static_cast<quint32>(data.size()) < blockSize) {
+            return {};
+        }
+        return QCryptographicHash::hash(data.left(blockSize), QCryptographicHash::Md5);
+    }
+
+    WebDavClient::RequestOptions requestOptions(const Database::RemoteFileConfig& remote)
+    {
+        WebDavClient::RequestOptions options;
+        options.url = remote.url;
+        options.username = remote.username;
+        options.password = remote.password;
+        options.timeoutMsec = remote.timeoutMsec > 0 ? remote.timeoutMsec : 30000;
+        options.useAuthentication = remote.useAuthentication;
+        return options;
+    }
+
+    // Random suffix so that two clients saving at the same time do not share the temporary file
+    QUrl temporaryUrl(const QUrl& url)
+    {
+        QUrl temporary(url);
+        temporary.setPath(
+            url.path()
+            + QStringLiteral(".%1.tmp").arg(QString::fromLatin1(Random::instance()->randomArray(4).toHex())));
+        return temporary;
+    }
+} // namespace
 
 /**
- * Last-resort lookup: if the in-memory RemoteFileConfig is missing credentials
- * but Config::LastWebDavCredentials has them (user checked "Remember"), inject them.
+ * Connection settings for a WebDAV path: the ones of this database if they match,
+ * otherwise those remembered for the URL (session, config and system keyring).
  */
-static void ensureWebDavCredsFromConfig(Database::RemoteFileConfig& cfg)
+Database::RemoteFileConfig Database::resolveRemoteConfig(const QString& filePath) const
 {
-    if (cfg.type != Database::RemoteFileConfig::Type::WebDav || !cfg.url.isValid()) {
-        return;
-    }
-    if (cfg.useAuthentication && !cfg.username.isEmpty() && !cfg.password.isEmpty()) {
-        return;
-    }
-    const QString normalized = WebDavClient::normalizePath(cfg.url);
-    const QVariantHash stored = config()->get(Config::LastWebDavCredentials).toHash();
-    auto it = stored.constFind(normalized);
-    if (it == stored.constEnd()) {
-        return;
-    }
-    const QVariantHash entry = it->toHash();
-    if (!entry.value(QStringLiteral("remember"), false).toBool()
-        || !entry.value(QStringLiteral("useAuthentication"), false).toBool()) {
-        return;
-    }
-    const QString user = entry.value(QStringLiteral("username")).toString();
-    const QString pass = entry.value(QStringLiteral("password")).toString();
-    if (user.isEmpty() || pass.isEmpty()) {
-        return;
-    }
-    cfg.useAuthentication = true;
-    cfg.username = user;
-    cfg.password = pass;
-    cfg.rememberCredentials = true;
-    if (cfg.timeoutMsec <= 0) {
-        cfg.timeoutMsec = entry.value(QStringLiteral("timeout"), 30000).toInt();
-    }
+    const auto url = WebDavClient::sanitizeUrl(QUrl(filePath));
+    const auto key = WebDavClient::normalizePath(url);
 
-    WebDavClient::debugLog(QStringLiteral("ensureWebDavCredsFromConfig: applied creds from Config for %1").arg(normalized));
+    RemoteFileConfig remote = m_data.remoteFile;
+    const bool matches =
+        remote.type == RemoteFileConfig::Type::WebDav && WebDavClient::normalizePath(remote.url) == key;
+    if (!matches || (remote.useAuthentication && remote.password.isEmpty())) {
+        RemoteFileConfig stored;
+        if (WebDavCredentials::instance()->lookup(url, stored)) {
+            remote = stored;
+        } else if (!matches) {
+            remote = RemoteFileConfig();
+        }
+    }
+    remote.type = RemoteFileConfig::Type::WebDav;
+    remote.url = url;
+    return remote;
 }
 
-bool Database::openFromWebDav(const QString& filePath,
-                              QSharedPointer<const CompositeKey> key,
-                              QString* error)
+bool Database::openFromWebDav(const QString& filePath, QSharedPointer<const CompositeKey> key, QString* error)
 {
-    RemoteFileConfig config = m_data.remoteFile;
-    QUrl url(filePath);
-    if (!url.isValid() || !WebDavClient::isWebDavScheme(url.scheme())) {
-        if (error) {
-            *error = tr("Invalid WebDAV url: %1").arg(filePath);
-        }
-        return false;
-    }
+    const auto remote = resolveRemoteConfig(filePath);
 
-    if (config.type != RemoteFileConfig::Type::WebDav || !config.url.isValid()) {
-        config.type = RemoteFileConfig::Type::WebDav;
-        config.url = WebDavClient::sanitizeUrl(url);
-        if (config.timeoutMsec <= 0) {
-            config.timeoutMsec = 30000;
-        }
-    }
-
-    ensureWebDavCredsFromConfig(config);
-    setRemoteFileConfig(config);
-
-    WebDavClient::RequestOptions options;
-    options.url = config.url;
-    options.username = config.username;
-    options.password = config.password;
-    options.timeoutMsec = config.timeoutMsec <= 0 ? 30000 : config.timeoutMsec;
-    options.useAuthentication = config.useAuthentication;
-
-    QByteArray payload;
     WebDavClient client;
-    if (!client.download(options, payload, error)) {
-        return false;
-    }
-
-    QBuffer buffer(&payload);
-    if (!buffer.open(QIODevice::ReadOnly)) {
+    auto response = client.get(requestOptions(remote));
+    if (!response.ok()) {
         if (error) {
-            *error = tr("Unable to read remote database stream.");
+            *error = response.error;
         }
         return false;
     }
+
+    QBuffer buffer(&response.body);
+    buffer.open(QIODevice::ReadOnly);
 
     setEmitModified(false);
 
-    m_fileBlockHash.clear();
-    if (static_cast<quint32>(payload.size()) >= kFileBlockToHashSizeBytes) {
-        m_fileBlockHash = QCryptographicHash::hash(
-            payload.left(static_cast<int>(kFileBlockToHashSizeBytes)), QCryptographicHash::Md5);
-    }
+    m_fileBlockHash = firstBlockHash(response.body, kFileBlockToHashSizeBytes);
+    m_remoteETag = response.etag;
 
     KeePass2Reader reader;
     if (!reader.readDatabase(&buffer, std::move(key), this)) {
@@ -312,9 +296,8 @@ bool Database::openFromWebDav(const QString& filePath,
         return false;
     }
 
-    buffer.close();
-
-    setFilePath(WebDavClient::normalizePath(config.url));
+    setRemoteFileConfig(remote);
+    setFilePath(WebDavClient::normalizePath(remote.url));
     markAsClean();
 
     emit databaseOpened();
@@ -322,91 +305,147 @@ bool Database::openFromWebDav(const QString& filePath,
 
     return true;
 }
-#endif
 
-#ifdef KPXC_FEATURE_WEBDAV
-bool Database::saveToWebDav(const QString& filePath, SaveAction action, const QString& backupFilePath, QString* error)
+/**
+ * Write an encrypted copy to a local file without attaching the database to it,
+ * used for backups of a WebDAV database.
+ */
+bool Database::saveCopy(const QString& filePath, QString* error)
 {
-    Q_UNUSED(action);
-    Q_UNUSED(backupFilePath);
+    QMutexLocker locker(&m_saveMutex);
 
-    if (!isInitialized()) {
+    QSaveFile saveFile(filePath);
+    if (!saveFile.open(QIODevice::WriteOnly)) {
         if (error) {
-            *error = tr("Could not save, database has not been initialized!");
+            *error = saveFile.errorString();
         }
         return false;
     }
-
-    RemoteFileConfig config = m_data.remoteFile;
-    QUrl url(filePath);
-    if (!url.isValid() || !WebDavClient::isWebDavScheme(url.scheme())) {
+    if (!writeDatabase(&saveFile, error)) {
+        saveFile.cancelWriting();
+        return false;
+    }
+    if (!saveFile.commit()) {
         if (error) {
-            *error = tr("Invalid WebDAV url: %1").arg(filePath);
+            *error = saveFile.errorString();
         }
         return false;
     }
+    return true;
+}
 
-    config.type = RemoteFileConfig::Type::WebDav;
-    config.url = WebDavClient::sanitizeUrl(url);
-    if (config.timeoutMsec <= 0) {
-        config.timeoutMsec = 30000;
+/**
+ * Save to a WebDAV server the way KeePass 2 does:
+ * - changes made on the server since the database was read are detected (ETag, or the hash
+ *   of the first block when the server gives no usable ETag) and handed to the same
+ *   merge / overwrite / discard prompt as for a local file;
+ * - unless the user turned off safe saves, the database is uploaded next to the target and then
+ *   renamed on the server (MOVE), so a failed upload never leaves a truncated database behind;
+ *   servers that refuse this get a direct upload instead.
+ */
+bool Database::saveToWebDav(const QString& filePath, SaveAction action, QString* error)
+{
+    auto remote = resolveRemoteConfig(filePath);
+    const auto options = requestOptions(remote);
+    const bool sameFile = WebDavClient::normalizePath(remote.url) == WebDavClient::normalizePath(QUrl(m_data.filePath));
+
+    auto unmergedChanges = [this, error] {
+        if (error) {
+            *error = tr("Database file has unmerged changes.");
+        }
+        // emit the databaseFileChanged(true) signal async
+        QMetaObject::invokeMethod(this, "databaseFileChanged", Qt::QueuedConnection, Q_ARG(bool, true));
+        return false;
+    };
+
+    WebDavClient client;
+
+    // Make sure we don't overwrite external modifications unless explicitly allowed
+    QByteArray ifMatch;
+    if (sameFile && !m_ignoreFileChangesUntilSaved && (!m_fileBlockHash.isEmpty() || !m_remoteETag.isEmpty())) {
+        const auto current = client.head(options);
+        if (current.status == 404) {
+            // Deleted on the server: write it again
+        } else if (!current.ok()) {
+            if (error) {
+                *error = current.error;
+            }
+            return false;
+        } else if (WebDavClient::isStrongETag(m_remoteETag) && !current.etag.isEmpty()) {
+            if (current.etag != m_remoteETag) {
+                return unmergedChanges();
+            }
+            ifMatch = m_remoteETag;
+        } else {
+            const auto content = client.get(options);
+            if (!content.ok()) {
+                if (error) {
+                    *error = content.error;
+                }
+                return false;
+            }
+            if (firstBlockHash(content.body, kFileBlockToHashSizeBytes) != m_fileBlockHash) {
+                return unmergedChanges();
+            }
+        }
     }
 
-    ensureWebDavCredsFromConfig(config);
-
-    m_fileWatcher->stop();
-
+    // Add random data to prevent side-channel data deduplication attacks
     int length = Random::instance()->randomUIntRange(64, 512);
     m_metadata->customData()->set(CustomData::RandomSlug, Random::instance()->randomArray(length).toHex());
 
+    // Prevent destructive operations while saving
     QMutexLocker locker(&m_saveMutex);
 
     QBuffer buffer;
-    if (!buffer.open(QIODevice::ReadWrite)) {
-        if (error) {
-            *error = tr("Unable to initialize remote upload buffer.");
-        }
-        return false;
-    }
-
+    buffer.open(QIODevice::WriteOnly);
     HashingStream hashingStream(&buffer, QCryptographicHash::Md5, kFileBlockToHashSizeBytes);
-    if (!hashingStream.open(QIODevice::WriteOnly)) {
-        if (error) {
-            *error = hashingStream.errorString();
-        }
-        return false;
-    }
-
-    if (!writeDatabase(&hashingStream, error)) {
-        return false;
-    }
-
-    hashingStream.close();
-
-    WebDavClient::RequestOptions options;
-    options.url = config.url;
-    options.username = config.username;
-    options.password = config.password;
-    options.timeoutMsec = config.timeoutMsec <= 0 ? 30000 : config.timeoutMsec;
-    options.useAuthentication = config.useAuthentication;
-
-    WebDavClient client;
-    if (!client.upload(options, buffer.buffer(), error)) {
+    if (!hashingStream.open(QIODevice::WriteOnly) || !writeDatabase(&hashingStream, error)) {
         markAsModified();
         return false;
     }
+    hashingStream.close();
 
-    QByteArray hash = hashingStream.hashingResult();
-    if (!hash.isEmpty()) {
-        m_fileBlockHash = hash;
-    } else {
-        m_fileBlockHash.clear();
+    WebDavClient::Response written;
+    if (action != DirectWrite) {
+        auto temporary = options;
+        temporary.url = temporaryUrl(options.url);
+        if (client.put(temporary, buffer.data()).ok()) {
+            written = client.move(temporary, options.url);
+            if (!written.ok()) {
+                client.remove(temporary);
+            }
+        }
+    }
+    if (!written.ok()) {
+        written = client.put(options, buffer.data(), ifMatch);
+        if (written.status == 412 && client.head(options).etag == ifMatch) {
+            // Unchanged after all: some servers alter the ETag they send (Apache adds "-gzip" when
+            // compressing) and then fail to match it, so do what KeePass 2 does and upload unconditionally
+            written = client.put(options, buffer.data());
+        }
+        if (written.status == 412) {
+            markAsModified();
+            return unmergedChanges();
+        }
+        if (!written.ok()) {
+            if (error) {
+                *error = written.error;
+            }
+            markAsModified();
+            return false;
+        }
     }
 
-    buffer.close();
+    m_fileBlockHash = hashingStream.hashingResult();
+    m_remoteETag = written.etag;
+    if (m_remoteETag.isEmpty()) {
+        // MOVE (and some servers on PUT) do not return the new ETag
+        m_remoteETag = client.head(options).etag;
+    }
 
-    setRemoteFileConfig(config);
-    setFilePath(WebDavClient::normalizePath(config.url));
+    setRemoteFileConfig(remote);
+    setFilePath(WebDavClient::normalizePath(remote.url));
     markAsClean();
     m_ignoreFileChangesUntilSaved = false;
 
@@ -504,10 +543,8 @@ bool Database::saveAs(const QString& filePath, SaveAction action, const QString&
     }
 
 #ifdef KPXC_FEATURE_WEBDAV
-    QUrl urlCandidate(filePath);
-    bool targetIsRemote = urlCandidate.isValid() && WebDavClient::isWebDavScheme(urlCandidate.scheme());
-    if (targetIsRemote || (hasRemoteFile() && filePath == m_data.filePath)) {
-        return saveToWebDav(filePath, action, backupFilePath, error);
+    if (WebDavClient::isWebDavUrl(filePath)) {
+        return saveToWebDav(filePath, action, error);
     }
 #endif
 
@@ -1484,7 +1521,7 @@ const Database::RemoteFileConfig& Database::remoteFileConfig() const
 bool Database::hasRemoteFile() const
 {
 #ifdef KPXC_FEATURE_WEBDAV
-    return m_data.remoteFile.type == RemoteFileConfig::Type::WebDav;
+    return WebDavClient::isWebDavUrl(m_data.filePath);
 #else
     return false;
 #endif

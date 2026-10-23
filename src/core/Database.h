@@ -79,13 +79,21 @@ public:
             WebDav
         };
 
+        // What is kept across sessions, like the "Remember" choice of KeePass 2
+        enum class Remember
+        {
+            Nothing,
+            UserName,
+            UserNameAndPassword
+        };
+
         Type type = Type::None;
         QUrl url;
         QString username;
         QString password;
         int timeoutMsec = 30000;
         bool useAuthentication = false;
-        bool rememberCredentials = false;
+        Remember remember = Remember::Nothing;
     };
 
     Database();
@@ -101,8 +109,9 @@ private:
     bool restoreDatabase(const QString& filePath, const QString& fromBackupFilePath);
     bool performSave(const QString& filePath, SaveAction flags, const QString& backupFilePath, QString* error);
 #ifdef KPXC_FEATURE_WEBDAV
+    RemoteFileConfig resolveRemoteConfig(const QString& filePath) const;
     bool openFromWebDav(const QString& filePath, QSharedPointer<const CompositeKey> key, QString* error);
-    bool saveToWebDav(const QString& filePath, SaveAction action, const QString& backupFilePath, QString* error);
+    bool saveToWebDav(const QString& filePath, SaveAction action, QString* error);
 #endif
 
 public:
@@ -144,6 +153,9 @@ public:
     int publicIcon();
     void setPublicIcon(int iconIndex);
 
+#ifdef KPXC_FEATURE_WEBDAV
+    bool saveCopy(const QString& filePath, QString* error = nullptr);
+#endif
     void setRemoteFileConfig(const RemoteFileConfig& config);
     const RemoteFileConfig& remoteFileConfig() const;
     bool hasRemoteFile() const;
@@ -271,6 +283,7 @@ private:
     void stopModifiedTimer();
 
     QByteArray m_fileBlockHash;
+    QByteArray m_remoteETag; // ETag of the WebDAV file as last read or written
     bool m_ignoreFileChangesUntilSaved;
     QPointer<Metadata> const m_metadata;
     DatabaseData m_data;

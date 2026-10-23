@@ -99,7 +99,8 @@ set(core_SOURCES
 
 if(KPXC_FEATURE_WEBDAV)
     list(APPEND core_SOURCES
-        core/remote/WebDavClient.cpp)
+        core/remote/WebDavClient.cpp
+        core/remote/WebDavCredentials.cpp)
 endif()
 
 set(gui_SOURCES
@@ -371,6 +372,9 @@ target_link_libraries(keepassxc_core
 
 if(KPXC_FEATURE_WEBDAV)
     target_link_libraries(keepassxc_core Qt6::Network)
+    if(KPXC_HAVE_QTKEYCHAIN)
+        target_link_libraries(keepassxc_core Qt6Keychain::Qt6Keychain)
+    endif()
 endif()
 
 # GUI Library Definition

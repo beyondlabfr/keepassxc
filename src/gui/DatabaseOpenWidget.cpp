@@ -28,10 +28,6 @@
 #include "keys/drivers/YubiKeyInterfaceUSB.h"
 #include "quickunlock/QuickUnlockInterface.h"
 
-#ifdef KPXC_FEATURE_WEBDAV
-#include "core/remote/WebDavClient.h"
-#endif
-
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QDesktopServices>
@@ -241,95 +237,16 @@ void DatabaseOpenWidget::showMessage(const QString& text, MessageWidget::Message
     m_ui->messageWidget->showMessage(text, type, autoHideTimeout);
 }
 
-void DatabaseOpenWidget::ensureWebDavCredentials()
+void DatabaseOpenWidget::load(const QString& filename)
 {
-#ifdef KPXC_FEATURE_WEBDAV
-    if (m_remoteConfig.type != Database::RemoteFileConfig::Type::WebDav) {
-        if (WebDavClient::isDebugEnabled()) {
-            WebDavClient::debugLog(QStringLiteral("ensureWebDavCredentials: skip (not WebDav type)"));
-        }
-        return;
-    }
-    if (m_remoteConfig.useAuthentication && !m_remoteConfig.username.isEmpty()
-        && !m_remoteConfig.password.isEmpty()) {
-        if (WebDavClient::isDebugEnabled()) {
-            WebDavClient::debugLog(
-                QStringLiteral("ensureWebDavCredentials: already have creds (user len=%1)")
-                    .arg(m_remoteConfig.username.length()));
-        }
-        return;
-    }
-    const QString normalized = WebDavClient::normalizePath(m_remoteConfig.url);
-    const QVariantHash stored = config()->get(Config::LastWebDavCredentials).toHash();
-    if (WebDavClient::isDebugEnabled()) {
-        QStringList keys;
-        for (auto sit = stored.constBegin(); sit != stored.constEnd(); ++sit) {
-            keys << sit.key();
-        }
-        WebDavClient::debugLog(QStringLiteral("ensureWebDavCredentials: lookup key=%1 storedKeys=%2 urlValid=%3")
-                                     .arg(normalized, keys.join(QLatin1Char('|')))
-                                     .arg(m_remoteConfig.url.isValid()));
-    }
-    auto it = stored.constFind(normalized);
-    if (it == stored.constEnd()) {
-        if (WebDavClient::isDebugEnabled()) {
-            WebDavClient::debugLog(
-                QStringLiteral("ensureWebDavCredentials: no config entry for normalized URL (key mismatch?)"));
-        }
-        return;
-    }
-    const QVariantHash entry = it->toHash();
-    if (!entry.value(QStringLiteral("remember"), false).toBool()
-        || !entry.value(QStringLiteral("useAuthentication"), false).toBool()) {
-        if (WebDavClient::isDebugEnabled()) {
-            WebDavClient::debugLog(QStringLiteral(
-                "ensureWebDavCredentials: entry found but remember/useAuth disabled"));
-        }
-        return;
-    }
-    const QString user = entry.value(QStringLiteral("username")).toString();
-    const QString pass = entry.value(QStringLiteral("password")).toString();
-    if (user.isEmpty() || pass.isEmpty()) {
-        if (WebDavClient::isDebugEnabled()) {
-            WebDavClient::debugLog(QStringLiteral(
-                "ensureWebDavCredentials: entry has empty username or password in config"));
-        }
-        return;
-    }
-    m_remoteConfig.useAuthentication = true;
-    m_remoteConfig.username = user;
-    m_remoteConfig.password = pass;
-    m_remoteConfig.rememberCredentials = true;
-    if (m_remoteConfig.timeoutMsec <= 0) {
-        m_remoteConfig.timeoutMsec = entry.value(QStringLiteral("timeout"), 30000).toInt();
-    }
-    if (WebDavClient::isDebugEnabled()) {
-        WebDavClient::debugLog(QStringLiteral("ensureWebDavCredentials: applied creds from LastWebDavCredentials"));
-    }
-#endif
-}
-
-void DatabaseOpenWidget::load(const QString& filename, const Database::RemoteFileConfig& remoteConfig)
-{
-    m_filename = filename;
-    m_remoteConfig = remoteConfig;
-    ensureWebDavCredentials();
     clearForms();
+
+    m_filename = filename;
 
     // Read public headers
     QString error;
     m_db.reset(new Database());
-    if (m_remoteConfig.type == Database::RemoteFileConfig::Type::WebDav) {
-        m_db->setRemoteFileConfig(m_remoteConfig);
-    }
     m_db->open(m_filename, nullptr, &error);
-
-#ifdef KPXC_FEATURE_WEBDAV
-    if (m_remoteConfig.type == Database::RemoteFileConfig::Type::WebDav && m_db->hasRemoteFile()) {
-        m_remoteConfig = m_db->remoteFileConfig();
-        ensureWebDavCredentials();
-    }
-#endif
 
     m_ui->fileNameLabel->setRawText(m_filename);
 
@@ -384,9 +301,6 @@ void DatabaseOpenWidget::clearForms()
     toggleQuickUnlockScreen();
 
     m_db.reset(new Database(m_filename));
-    if (m_remoteConfig.type == Database::RemoteFileConfig::Type::WebDav) {
-        m_db->setRemoteFileConfig(m_remoteConfig);
-    }
 }
 
 QSharedPointer<Database> DatabaseOpenWidget::database()
@@ -429,13 +343,8 @@ void DatabaseOpenWidget::openDatabase()
         return;
     }
 
-    ensureWebDavCredentials();
-
     QString error;
     m_db.reset(new Database());
-    if (m_remoteConfig.type == Database::RemoteFileConfig::Type::WebDav) {
-        m_db->setRemoteFileConfig(m_remoteConfig);
-    }
     bool ok = m_db->open(m_filename, databaseKey, &error);
 
     if (ok) {
@@ -456,9 +365,6 @@ void DatabaseOpenWidget::openDatabase()
             msgBox->exec();
             if (msgBox->clickedButton() != btn) {
                 m_db.reset(new Database());
-                if (m_remoteConfig.type == Database::RemoteFileConfig::Type::WebDav) {
-                    m_db->setRemoteFileConfig(m_remoteConfig);
-                }
                 m_db->open(m_filename, nullptr, &error);
 
                 m_ui->messageWidget->showMessage(tr("Database unlock canceled."), MessageWidget::MessageType::Error);

@@ -1,18 +1,51 @@
-#include "core/remote/WebDavClient.h"
+/*
+ *  Copyright (C) 2026 BeyondLab
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 2 or (at your option)
+ *  version 3 of the License.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
-#include <QDebug>
+#include "WebDavClient.h"
+
+#include <QCoreApplication>
 #include <QEventLoop>
-
-#include <cstdio>
-#include <cstring>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QObject>
-#include <QThread>
 #include <QTimer>
 
-QHash<QUrl, WebDavClient::ETagEntry> WebDavClient::s_etagCache;
+namespace
+{
+    constexpr int kMaxReadRetries = 2;
+    constexpr int kRetryDelayMsec = 500;
+
+    void waitFor(QNetworkReply* reply)
+    {
+        if (reply->isFinished()) {
+            return;
+        }
+        QEventLoop loop;
+        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        loop.exec(QEventLoop::ExcludeUserInputEvents);
+    }
+
+    void pause(int msec)
+    {
+        QEventLoop loop;
+        QTimer::singleShot(msec, &loop, &QEventLoop::quit);
+        loop.exec(QEventLoop::ExcludeUserInputEvents);
+    }
+} // namespace
 
 bool WebDavClient::isWebDavScheme(const QString& scheme)
 {
@@ -22,17 +55,22 @@ bool WebDavClient::isWebDavScheme(const QString& scheme)
            || scheme.compare(QLatin1String("webdavs"), Qt::CaseInsensitive) == 0;
 }
 
+bool WebDavClient::isWebDavUrl(const QString& path)
+{
+    // Requiring "://" keeps Windows drive letters (C:/...) and plain paths out
+    if (!path.contains(QLatin1String("://"))) {
+        return false;
+    }
+    const QUrl url(path);
+    return url.isValid() && isWebDavScheme(url.scheme());
+}
+
 QUrl WebDavClient::toHttpUrl(const QUrl& original)
 {
-    if (original.scheme().compare(QLatin1String("webdav"), Qt::CaseInsensitive) != 0
-        && original.scheme().compare(QLatin1String("webdavs"), Qt::CaseInsensitive) != 0) {
-        return original;
-    }
-
     QUrl copy(original);
     if (copy.scheme().compare(QLatin1String("webdav"), Qt::CaseInsensitive) == 0) {
         copy.setScheme(QStringLiteral("http"));
-    } else {
+    } else if (copy.scheme().compare(QLatin1String("webdavs"), Qt::CaseInsensitive) == 0) {
         copy.setScheme(QStringLiteral("https"));
     }
     return copy;
@@ -47,261 +85,151 @@ QUrl WebDavClient::sanitizeUrl(const QUrl& url)
 
 QString WebDavClient::normalizePath(const QUrl& url)
 {
-    QUrl copy = toHttpUrl(sanitizeUrl(url));
-    return copy.toString(QUrl::FullyEncoded);
+    return toHttpUrl(sanitizeUrl(url)).toString(QUrl::FullyEncoded);
 }
 
-bool WebDavClient::isDebugEnabled()
+bool WebDavClient::isStrongETag(const QByteArray& etag)
 {
-    static const bool enabled = [] {
-        const QByteArray v = qgetenv("KEEPASSXC_DEBUG_WEBDAV");
-        return !v.isEmpty() && v != "0" && v != "false" && v != "no";
-    }();
-    return enabled;
+    return !etag.isEmpty() && !etag.startsWith("W/");
 }
 
-void WebDavClient::debugLog(const QString& message)
+WebDavClient::Response WebDavClient::get(const RequestOptions& options)
 {
-    if (!isDebugEnabled()) {
-        return;
+    return sendWithRetry("GET", options);
+}
+
+WebDavClient::Response WebDavClient::head(const RequestOptions& options)
+{
+    return sendWithRetry("HEAD", options);
+}
+
+WebDavClient::Response
+WebDavClient::put(const RequestOptions& options, const QByteArray& data, const QByteArray& ifMatch)
+{
+    QList<QPair<QByteArray, QByteArray>> headers;
+    headers.append(qMakePair(QByteArray("Content-Type"), QByteArray("application/octet-stream")));
+    if (!ifMatch.isEmpty()) {
+        headers.append(qMakePair(QByteArray("If-Match"), ifMatch));
     }
-    static bool s_bannerPrinted = false;
-    if (!s_bannerPrinted) {
-        s_bannerPrinted = true;
-        static const char banner[] =
-            "[KeePassXC WebDAV] debug logging enabled (set KEEPASSXC_DEBUG_WEBDAV=1 before launch)\n";
-        fwrite(banner, 1, strlen(banner), stderr);
-        fflush(stderr);
-    }
-    const QString line = QStringLiteral("[KeePassXC WebDAV] ") + message + QLatin1Char('\n');
-    const QByteArray utf8 = line.toUtf8();
-    fwrite(utf8.constData(), 1, static_cast<size_t>(utf8.size()), stderr);
-    fflush(stderr);
-    qDebug().noquote() << "[KeePassXC WebDAV]" << message;
+    // Writes are not retried: a retry after a timeout could hit our own first write and report a false conflict
+    return send("PUT", options, data, headers);
 }
 
-bool WebDavClient::download(const RequestOptions& options, QByteArray& data, QString* error)
+WebDavClient::Response WebDavClient::move(const RequestOptions& options, const QUrl& destination)
 {
+    return send(
+        "MOVE", options, {}, {{"Destination", toHttpUrl(sanitizeUrl(destination)).toEncoded()}, {"Overwrite", "T"}});
+}
+
+WebDavClient::Response WebDavClient::remove(const RequestOptions& options)
+{
+    return send("DELETE", options);
+}
+
+WebDavClient::Response WebDavClient::sendWithRetry(const QByteArray& method, const RequestOptions& options)
+{
+    Response response;
+    for (int attempt = 0; attempt <= kMaxReadRetries; ++attempt) {
+        if (attempt > 0) {
+            pause(kRetryDelayMsec * attempt);
+        }
+        response = send(method, options);
+        // Only retry what may be transient: no answer at all, or a server-side error
+        if (response.ok() || (response.status != 0 && response.status < 500)) {
+            break;
+        }
+    }
+    return response;
+}
+
+WebDavClient::Response WebDavClient::send(const QByteArray& method,
+                                          const RequestOptions& options,
+                                          const QByteArray& body,
+                                          const QList<QPair<QByteArray, QByteArray>>& headers)
+{
+    QNetworkRequest request(toHttpUrl(options.url));
+    // A redirected write would be reported as a success without storing anything
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    // Inactivity timeout: slow but progressing transfers of large databases are not cut off
+    request.setTransferTimeout(options.timeoutMsec > 0 ? options.timeoutMsec : 30000);
+    // Do not set Accept-Encoding by hand: Qt only decompresses replies when it negotiated compression itself
+    if (options.useAuthentication && !options.username.isEmpty()) {
+        const auto credentials = QStringLiteral("%1:%2").arg(options.username, options.password).toUtf8().toBase64();
+        request.setRawHeader("Authorization", "Basic " + credentials);
+    }
+    for (const auto& header : headers) {
+        request.setRawHeader(header.first, header.second);
+    }
+
+    // Use the dedicated calls where they exist: as a custom verb, HEAD would make Qt wait for a body
+    // that never comes until the server drops the connection
+    QNetworkReply* reply;
     auto* manager = networkManager();
-    const QUrl httpUrl = toHttpUrl(options.url);
-    const int timeout = options.timeoutMsec > 0 ? options.timeoutMsec : 30000;
-
-    if (isDebugEnabled()) {
-        debugLog(QStringLiteral("download: url=%1 useAuth=%2 userEmpty=%3 passEmpty=%4")
-                     .arg(httpUrl.toString(QUrl::FullyEncoded))
-                     .arg(options.useAuthentication)
-                     .arg(options.username.isEmpty())
-                     .arg(options.password.isEmpty()));
+    if (method == "GET") {
+        reply = manager->get(request);
+    } else if (method == "HEAD") {
+        reply = manager->head(request);
+    } else if (method == "PUT") {
+        reply = manager->put(request, body);
+    } else if (method == "DELETE") {
+        reply = manager->deleteResource(request);
+    } else {
+        reply = manager->sendCustomRequest(request, method, body);
     }
+    waitFor(reply);
 
-    for (int attempt = 0; attempt <= kMaxRetries; ++attempt) {
-        QNetworkRequest request(httpUrl);
-        request.setRawHeader("Accept-Encoding", "gzip, deflate");
-        applyBasicAuth(options, request);
-
-        auto cacheIt = s_etagCache.constFind(options.url);
-        if (cacheIt != s_etagCache.constEnd() && !cacheIt->etag.isEmpty()) {
-            request.setRawHeader("If-None-Match", cacheIt->etag);
-        }
-
-        auto* reply = manager->get(request);
-        if (!waitForReply(reply, timeout, error)) {
-            reply->deleteLater();
-            if (attempt < kMaxRetries) {
-                QThread::msleep(kBaseRetryDelayMs * (1 << attempt));
-                continue;
-            }
-            return false;
-        }
-
-        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-
-        if (statusCode == 304 && cacheIt != s_etagCache.constEnd()) {
-            data = cacheIt->data;
-            reply->deleteLater();
-            return true;
-        }
-
-        if (statusCode >= 500 && attempt < kMaxRetries) {
-            reply->deleteLater();
-            QThread::msleep(kBaseRetryDelayMs * (1 << attempt));
-            continue;
-        }
-
-        // HTTP 401/403: Qt met quand même reply->error() à AuthenticationRequiredError — il faut
-        // traiter le statut HTTP avant reply->error(), sinon le message « Host requires authentication »
-        // apparaît à tort (ex. au déverrouillage après verrouillage d'une base WebDAV).
-        if (statusCode == 401 || statusCode == 403) {
-            s_etagCache.remove(options.url);
-            if (isDebugEnabled()) {
-                debugLog(QStringLiteral("download HTTP %1: missingCredsBranch=%2 (useAuth=%3 userEmpty=%4 passEmpty=%5)")
-                             .arg(statusCode)
-                             .arg(!options.useAuthentication || options.username.isEmpty()
-                                  || options.password.isEmpty())
-                             .arg(options.useAuthentication)
-                             .arg(options.username.isEmpty())
-                             .arg(options.password.isEmpty()));
-            }
-            if (error) {
-                if (!options.useAuthentication || options.username.isEmpty() || options.password.isEmpty()) {
-                    *error = QObject::tr(
-                        "WebDAV: the server requires authentication. Re-open the database from the WebDAV "
-                        "menu and enter your remote username and password (enable \"Remember credentials\" "
-                        "to keep them after locking the database).");
-                } else {
-                    *error = QObject::tr("WebDAV: the server rejected the credentials (HTTP %1).").arg(statusCode);
-                }
-            }
-            reply->deleteLater();
-            return false;
-        }
-
-        if (reply->error() != QNetworkReply::NoError || statusCode >= 400) {
-            if (error) {
-                *error = reply->errorString();
-            }
-            reply->deleteLater();
-            return false;
-        }
-
-        data = reply->readAll();
-
-        const QByteArray etag = reply->rawHeader("ETag");
-        if (!etag.isEmpty()) {
-            s_etagCache.insert(options.url, {etag, data});
-        }
-
-        reply->deleteLater();
-        return true;
+    Response response;
+    response.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    response.etag = reply->rawHeader("ETag");
+    if (response.status >= 200 && response.status < 300) {
+        response.body = reply->readAll();
+    } else {
+        response.error = describeFailure(reply, response.status, options);
     }
-
-    return false;
+    reply->deleteLater();
+    return response;
 }
 
-bool WebDavClient::upload(const RequestOptions& options, const QByteArray& data, QString* error)
+QString WebDavClient::describeFailure(QNetworkReply* reply, int status, const RequestOptions& options)
 {
-    auto* manager = networkManager();
-    const QUrl httpUrl = toHttpUrl(options.url);
-    const int timeout = options.timeoutMsec > 0 ? options.timeoutMsec : 30000;
-
-    if (isDebugEnabled()) {
-        debugLog(QStringLiteral("upload: url=%1 useAuth=%2 userEmpty=%3 passEmpty=%4")
-                     .arg(httpUrl.toString(QUrl::FullyEncoded))
-                     .arg(options.useAuthentication)
-                     .arg(options.username.isEmpty())
-                     .arg(options.password.isEmpty()));
+    // Check the HTTP status before reply->error(): Qt reports 401/403 as AuthenticationRequiredError
+    if (status == 401 || status == 403) {
+        if (!options.useAuthentication || options.username.isEmpty() || options.password.isEmpty()) {
+            return tr("WebDAV: the server requires a user name and password (HTTP %1).").arg(status);
+        }
+        return tr("WebDAV: the server rejected the user name or password (HTTP %1).").arg(status);
     }
-
-    for (int attempt = 0; attempt <= kMaxRetries; ++attempt) {
-        QNetworkRequest request(httpUrl);
-        request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/octet-stream"));
-        applyBasicAuth(options, request);
-
-        auto* reply = manager->put(request, data);
-        if (!waitForReply(reply, timeout, error)) {
-            reply->deleteLater();
-            if (attempt < kMaxRetries) {
-                QThread::msleep(kBaseRetryDelayMs * (1 << attempt));
-                continue;
-            }
-            return false;
-        }
-
-        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-
-        if (statusCode >= 500 && attempt < kMaxRetries) {
-            reply->deleteLater();
-            QThread::msleep(kBaseRetryDelayMs * (1 << attempt));
-            continue;
-        }
-
-        if (statusCode == 401 || statusCode == 403) {
-            s_etagCache.remove(options.url);
-            if (isDebugEnabled()) {
-                debugLog(QStringLiteral("upload HTTP %1: missingCredsBranch=%2 (useAuth=%3 userEmpty=%4 passEmpty=%5)")
-                             .arg(statusCode)
-                             .arg(!options.useAuthentication || options.username.isEmpty()
-                                  || options.password.isEmpty())
-                             .arg(options.useAuthentication)
-                             .arg(options.username.isEmpty())
-                             .arg(options.password.isEmpty()));
-            }
-            if (error) {
-                if (!options.useAuthentication || options.username.isEmpty() || options.password.isEmpty()) {
-                    *error = QObject::tr(
-                        "WebDAV: the server requires authentication. Re-open the database from the WebDAV "
-                        "menu and enter your remote username and password (enable \"Remember credentials\" "
-                        "to keep them after locking the database).");
-                } else {
-                    *error = QObject::tr("WebDAV: the server rejected the credentials (HTTP %1).").arg(statusCode);
-                }
-            }
-            reply->deleteLater();
-            return false;
-        }
-
-        if (reply->error() != QNetworkReply::NoError
-            || (statusCode >= 400 && statusCode != 204)) {
-            if (error) {
-                *error = reply->errorString();
-            }
-            reply->deleteLater();
-            return false;
-        }
-
-        s_etagCache.remove(options.url);
-
-        reply->deleteLater();
-        return true;
+    if (status >= 300 && status < 400) {
+        const auto location = reply->rawHeader("Location");
+        return tr("WebDAV: the server redirects to %1, use this address instead (HTTP %2).")
+            .arg(QString::fromUtf8(location))
+            .arg(status);
     }
-
-    return false;
-}
-
-void WebDavClient::clearETagCache()
-{
-    s_etagCache.clear();
+    if (status == 404) {
+        return tr("WebDAV: file not found on the server (HTTP 404).");
+    }
+    if (status == 412) {
+        return tr("WebDAV: the file was modified on the server (HTTP 412).");
+    }
+    if (reply->error() == QNetworkReply::OperationCanceledError || reply->error() == QNetworkReply::TimeoutError) {
+        return tr("WebDAV: the server did not answer within %1 seconds.")
+            .arg((options.timeoutMsec > 0 ? options.timeoutMsec : 30000) / 1000);
+    }
+    if (status != 0) {
+        return tr("WebDAV: the server answered HTTP %1 %2.")
+            .arg(status)
+            .arg(reply->attribute(QNetworkRequest::HttpReasonPhraseAttribute).toString());
+    }
+    return tr("WebDAV: %1").arg(reply->errorString());
 }
 
 QNetworkAccessManager* WebDavClient::networkManager()
 {
-    static auto* instance = new QNetworkAccessManager();
-    return instance;
-}
-
-void WebDavClient::applyBasicAuth(const RequestOptions& options, QNetworkRequest& request)
-{
-    if (!options.useAuthentication || options.username.isEmpty()) {
-        return;
-    }
-
-    const QByteArray credentials =
-        QStringLiteral("%1:%2").arg(options.username, options.password).toUtf8().toBase64();
-    request.setRawHeader("Authorization", "Basic " + credentials);
-}
-
-bool WebDavClient::waitForReply(QNetworkReply* reply, int timeoutMsec, QString* error)
-{
-    QEventLoop loop;
-    QTimer timer;
-    timer.setSingleShot(true);
-
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-
-    timer.start(timeoutMsec);
-    loop.exec();
-
-    if (timer.isActive()) {
-        timer.stop();
-        return true;
-    }
-
-    QObject::disconnect(reply, nullptr, &loop, nullptr);
-    reply->abort();
-
-    if (error) {
-        *error = QObject::tr("WebDAV request timed out after %1 ms").arg(timeoutMsec);
-    }
-    return false;
+    static QNetworkAccessManager* manager = [] {
+        auto* nam = new QNetworkAccessManager(QCoreApplication::instance());
+        // Each request carries its own transfer timeout
+        nam->setTransferTimeout(0);
+        return nam;
+    }();
+    return manager;
 }

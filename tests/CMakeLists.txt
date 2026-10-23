@@ -154,6 +154,12 @@ add_unit_test(NAME testsharing SOURCES TestSharing.cpp
 add_unit_test(NAME testdatabase SOURCES TestDatabase.cpp
         LIBS testsupport ${TEST_LIBRARIES})
 
+if(KPXC_FEATURE_WEBDAV)
+    # Needs a WebDAV server, skipped otherwise: see scripts/test-webdav.sh
+    add_unit_test(NAME testwebdav SOURCES TestWebDav.cpp
+            LIBS testsupport ${TEST_LIBRARIES})
+endif()
+
 add_unit_test(NAME testtools SOURCES TestTools.cpp
         LIBS testsupport ${TEST_LIBRARIES})
 

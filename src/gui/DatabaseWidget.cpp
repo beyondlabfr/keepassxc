@@ -72,23 +72,6 @@
 #include "gui/passkeys/PasskeyImporter.h"
 #endif
 
-#ifdef KPXC_FEATURE_WEBDAV
-#include "core/remote/WebDavClient.h"
-#include "gui/DatabaseTabWidget.h"
-#endif
-
-#ifdef KPXC_FEATURE_WEBDAV
-static DatabaseTabWidget* findParentTabWidget(const QWidget* widget)
-{
-    for (QWidget* p = widget ? widget->parentWidget() : nullptr; p; p = p->parentWidget()) {
-        if (auto* tabs = qobject_cast<DatabaseTabWidget*>(p)) {
-            return tabs;
-        }
-    }
-    return nullptr;
-}
-#endif
-
 DatabaseWidget::DatabaseWidget(QSharedPointer<Database> db, QWidget* parent)
     : QStackedWidget(parent)
     , m_db(std::move(db))
@@ -379,7 +362,7 @@ QString DatabaseWidget::displayFileName() const
 {
     if (m_db) {
         if (m_db->hasRemoteFile()) {
-            return m_db->remoteFileConfig().url.fileName();
+            return QUrl(m_db->filePath()).fileName();
         }
         QFileInfo fileinfo(m_db->filePath());
         return fileinfo.fileName();
@@ -1634,40 +1617,6 @@ void DatabaseWidget::switchToDatabaseSettings()
     }
 }
 
-#ifdef KPXC_FEATURE_WEBDAV
-Database::RemoteFileConfig DatabaseWidget::resolveWebDavCredentials(const QString& filePath) const
-{
-    Database::RemoteFileConfig remote = m_db->remoteFileConfig();
-    auto* tabs = findParentTabWidget(this);
-    if (WebDavClient::isDebugEnabled()) {
-        WebDavClient::debugLog(
-            QStringLiteral("resolveWebDavCredentials: filePath=%1 parentTabFound=%2 before useAuth=%3 userEmpty=%4 "
-                           "passEmpty=%5")
-                .arg(filePath)
-                .arg(tabs != nullptr)
-                .arg(remote.useAuthentication)
-                .arg(remote.username.isEmpty())
-                .arg(remote.password.isEmpty()));
-    }
-    if (tabs) {
-        const QString normalized = WebDavClient::normalizePath(QUrl(filePath));
-        remote = tabs->mergeStoredWebDavCredentials(normalized, remote);
-        if (WebDavClient::isDebugEnabled()) {
-            WebDavClient::debugLog(
-                QStringLiteral("resolveWebDavCredentials: after merge useAuth=%1 userEmpty=%2 passEmpty=%3 norm=%4")
-                    .arg(remote.useAuthentication)
-                    .arg(remote.username.isEmpty())
-                    .arg(remote.password.isEmpty())
-                    .arg(normalized));
-        }
-    } else if (WebDavClient::isDebugEnabled()) {
-        WebDavClient::debugLog(
-            QStringLiteral("resolveWebDavCredentials: DatabaseTabWidget not found in parent chain"));
-    }
-    return remote;
-}
-#endif
-
 void DatabaseWidget::switchToOpenDatabase()
 {
     if (currentWidget() != m_databaseOpenWidget || m_databaseOpenWidget->filename() != m_db->filePath()) {
@@ -1677,13 +1626,7 @@ void DatabaseWidget::switchToOpenDatabase()
 
 void DatabaseWidget::switchToOpenDatabase(const QString& filePath)
 {
-    Database::RemoteFileConfig remote = m_db->remoteFileConfig();
-#ifdef KPXC_FEATURE_WEBDAV
-    if (m_db->hasRemoteFile()) {
-        remote = resolveWebDavCredentials(filePath);
-    }
-#endif
-    m_databaseOpenWidget->load(filePath, remote);
+    m_databaseOpenWidget->load(filePath);
     setCurrentWidget(m_databaseOpenWidget);
 }
 
@@ -2197,13 +2140,8 @@ bool DatabaseWidget::lock()
     switchToOpenDatabase(m_db->filePath());
 
     auto newDb = QSharedPointer<Database>::create(m_db->filePath());
-    if (m_db->hasRemoteFile()) {
-#ifdef KPXC_FEATURE_WEBDAV
-        newDb->setRemoteFileConfig(resolveWebDavCredentials(m_db->filePath()));
-#else
-        newDb->setRemoteFileConfig(m_db->remoteFileConfig());
-#endif
-    } else {
+    // No network request while locking: the unlock screen reads the WebDAV database itself
+    if (!m_db->hasRemoteFile()) {
         newDb->open(nullptr);
     }
     replaceDatabase(newDb);
@@ -2311,13 +2249,6 @@ void DatabaseWidget::reloadDatabaseFile(bool triggeredBySave)
     };
 
     auto db = QSharedPointer<Database>::create(m_db->filePath());
-    if (m_db->hasRemoteFile()) {
-#ifdef KPXC_FEATURE_WEBDAV
-        db->setRemoteFileConfig(resolveWebDavCredentials(m_db->filePath()));
-#else
-        db->setRemoteFileConfig(m_db->remoteFileConfig());
-#endif
-    }
     bool openResult = db->open(database()->key());
 
     // skip if the db is unchanged, or the db file is gone or for sure not a kp-db
@@ -2638,7 +2569,9 @@ bool DatabaseWidget::saveAs()
     }
 
     QString oldFilePath = m_db->filePath();
-    if (!QFileInfo::exists(oldFilePath)) {
+    if (m_db->hasRemoteFile()) {
+        oldFilePath = QDir::toNativeSeparators(FileDialog::getLastDir("db") + "/" + displayFileName());
+    } else if (!QFileInfo::exists(oldFilePath)) {
         QString defaultFileName = config()->get(Config::DefaultDatabaseFileName).toString();
         oldFilePath =
             QDir::toNativeSeparators(FileDialog::getLastDir("db") + "/"
@@ -2728,7 +2661,9 @@ bool DatabaseWidget::performSave(QString& errorMessage, const QString& fileName)
 bool DatabaseWidget::saveBackup()
 {
     QString oldFilePath = m_db->filePath();
-    if (!QFileInfo::exists(oldFilePath)) {
+    if (m_db->hasRemoteFile()) {
+        oldFilePath = QDir::toNativeSeparators(FileDialog::getLastDir("db") + "/" + displayFileName());
+    } else if (!QFileInfo::exists(oldFilePath)) {
         QString defaultFileName = config()->get(Config::DefaultDatabaseFileName).toString();
         oldFilePath =
             QDir::toNativeSeparators(FileDialog::getLastDir("db") + "/"
@@ -2744,6 +2679,19 @@ bool DatabaseWidget::saveBackup()
     if (newFilePath.isEmpty()) {
         return false;
     }
+
+#ifdef KPXC_FEATURE_WEBDAV
+    // The database must stay attached to the server: write a copy instead of a save-as and back
+    if (m_db->hasRemoteFile()) {
+        QString error;
+        if (!m_db->saveCopy(newFilePath, &error)) {
+            showErrorMessage(tr("Failed to save backup database: %1").arg(error));
+            return false;
+        }
+        FileDialog::saveLastDir("backup", newFilePath, true);
+        return true;
+    }
+#endif
 
     // Record modified state so we can restore after save
     bool modified = m_db->isModified();

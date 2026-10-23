@@ -591,6 +591,15 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 
+# Find QtKeychain, optional: without it the WebDAV password cannot be remembered across sessions
+if(KPXC_FEATURE_WEBDAV)
+    find_package(Qt6Keychain QUIET)
+    if(Qt6Keychain_FOUND)
+        set(KPXC_HAVE_QTKEYCHAIN ON)
+    endif()
+    add_feature_info("WebDAV keyring" KPXC_HAVE_QTKEYCHAIN "Remember WebDAV passwords in the system keyring (QtKeychain)")
+endif()
+
 # Find zxcvbn or use the bundled version
 find_library(ZXCVBN_LIBRARIES zxcvbn)
 find_path(ZXCVBN_INCLUDE_DIR zxcvbn.h PATH_SUFFIXES zxcvbn)

@@ -25,7 +25,6 @@
 
 #include "gui/DialogyWidget.h"
 #include "gui/MessageWidget.h"
-#include "core/Database.h"
 #include "osutils/DeviceListener.h"
 
 class CompositeKey;
@@ -44,7 +43,7 @@ class DatabaseOpenWidget : public DialogyWidget
 public:
     explicit DatabaseOpenWidget(QWidget* parent = nullptr);
     ~DatabaseOpenWidget() override;
-    void load(const QString& filename, const Database::RemoteFileConfig& remoteConfig = Database::RemoteFileConfig());
+    void load(const QString& filename);
     QString filename();
     void clearForms();
     void enterKey(const QString& pw, const QString& keyFile);
@@ -71,7 +70,6 @@ protected:
     const QScopedPointer<Ui::DatabaseOpenWidget> m_ui;
     QSharedPointer<Database> m_db;
     QString m_filename;
-    Database::RemoteFileConfig m_remoteConfig;
     bool m_retryUnlockWithEmptyPassword = false;
 
 protected slots:
@@ -86,8 +84,6 @@ private slots:
     void hardwareKeyResponse(bool found);
 
 private:
-    void ensureWebDavCredentials();
-
     QPointer<DeviceListener> m_deviceListener;
     bool m_pollingHardwareKey = false;
     bool m_manualHardwareKeyRefresh = false;

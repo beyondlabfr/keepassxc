@@ -19,15 +19,14 @@
 #define KEEPASSXC_DATABASETABWIDGET_H
 
 #include "DatabaseOpenDialog.h"
-#include "core/Database.h"
 #include "config-keepassx.h"
+#include "core/Database.h"
 #include "gui/MessageWidget.h"
 #include "wizard/ImportWizard.h"
 
 #include <QSet>
 #include <QTabWidget>
 #include <QTimer>
-#include <QHash>
 
 class Database;
 class DatabaseWidget;
@@ -57,10 +56,6 @@ public slots:
                         bool inBackground = false,
                         const QString& password = {},
                         const QString& keyfile = {});
-    void addDatabaseTab(const Database::RemoteFileConfig& remoteConfig,
-                        bool inBackground = false,
-                        const QString& password = {},
-                        const QString& keyfile = {});
     void addDatabaseTab(DatabaseWidget* dbWidget, bool inBackground = false);
     bool closeDatabaseTab(int index);
     bool closeDatabaseTab(DatabaseWidget* dbWidget);
@@ -72,11 +67,6 @@ public slots:
     DatabaseWidget* newDatabase();
     void openDatabase();
     void openWebDavDatabase();
-#ifdef KPXC_FEATURE_WEBDAV
-    /** Merge in-memory WebDAV config with persisted credentials when the database copy lacks them (e.g. after lock). */
-    Database::RemoteFileConfig mergeStoredWebDavCredentials(const QString& normalizedWebDavPath,
-                                                            const Database::RemoteFileConfig& current) const;
-#endif
     void mergeDatabase();
     void importFile();
     bool saveDatabase(int index = -1);
@@ -134,11 +124,8 @@ private:
     bool warnOnExport();
     void displayUnlockDialog();
 #ifdef KPXC_FEATURE_WEBDAV
-    void loadWebDavCredentials();
-    void persistWebDavCredentials() const;
-    Database::RemoteFileConfig storedWebDavConfig(const QString& normalizedPath) const;
-    void rememberWebDavConfig(const Database::RemoteFileConfig& config);
-    void forgetWebDavConfig(const QString& normalizedPath);
+    void storeWebDavSettings(const Database::RemoteFileConfig& remote);
+    void addWebDavDatabaseTab(const QString& url, bool inBackground, const QString& password, const QString& keyfile);
 #endif
 
     QPointer<DatabaseWidgetStateSync> m_dbWidgetStateSync;
@@ -148,9 +135,6 @@ private:
     QTimer m_lockDelayTimer;
     bool m_databaseOpenInProgress;
     QSet<DatabaseWidget*> m_widgetsPendingClose;
-#ifdef KPXC_FEATURE_WEBDAV
-    QHash<QString, Database::RemoteFileConfig> m_webDavCredentials;
-#endif
 };
 
 #endif // KEEPASSXC_DATABASETABWIDGET_H

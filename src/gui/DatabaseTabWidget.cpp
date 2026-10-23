@@ -19,17 +19,12 @@
 
 #include <QFileInfo>
 #include <QTabBar>
-#include <QUrl>
-#include <QVariantHash>
 
 #include "autotype/AutoType.h"
-#include "core/Config.h"
 #include "core/Merger.h"
 #include "core/Tools.h"
 #include "format/CsvExporter.h"
 #include "gui/Clipboard.h"
-#include "core/remote/WebDavClient.h"
-#include "gui/dialogs/WebDavOpenDialog.h"
 #include "gui/DatabaseIcons.h"
 #include "gui/DatabaseOpenDialog.h"
 #include "gui/DatabaseWidget.h"
@@ -41,6 +36,11 @@
 #include "gui/osutils/macutils/MacUtils.h"
 #endif
 #include "gui/wizard/NewDatabaseWizard.h"
+#ifdef KPXC_FEATURE_WEBDAV
+#include "core/remote/WebDavClient.h"
+#include "core/remote/WebDavCredentials.h"
+#include "gui/dialogs/WebDavOpenDialog.h"
+#endif
 
 DatabaseTabWidget::DatabaseTabWidget(QWidget* parent)
     : QTabWidget(parent)
@@ -74,10 +74,6 @@ DatabaseTabWidget::DatabaseTabWidget(QWidget* parent)
 
     m_lockDelayTimer.setSingleShot(true);
     connect(&m_lockDelayTimer, &QTimer::timeout, this, [this] { lockDatabases(); });
-
-#ifdef KPXC_FEATURE_WEBDAV
-    loadWebDavCredentials();
-#endif
 }
 
 DatabaseTabWidget::~DatabaseTabWidget() = default;
@@ -152,35 +148,6 @@ void DatabaseTabWidget::openDatabase()
     }
 }
 
-void DatabaseTabWidget::openWebDavDatabase()
-{
-#ifdef KPXC_FEATURE_WEBDAV
-    WebDavOpenDialog dialog(this);
-    Database::RemoteFileConfig initial;
-    initial.type = Database::RemoteFileConfig::Type::WebDav;
-    dialog.setInitialConfig(initial);
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-    auto remoteConfig = dialog.remoteConfig();
-    if (!remoteConfig.url.isValid()) {
-        return;
-    }
-    remoteConfig.url = QUrl(WebDavClient::normalizePath(remoteConfig.url));
-    const QString normalized = remoteConfig.url.toString(QUrl::FullyEncoded);
-
-    if (remoteConfig.rememberCredentials && remoteConfig.useAuthentication) {
-        rememberWebDavConfig(remoteConfig);
-    } else {
-        forgetWebDavConfig(normalized);
-    }
-
-    addDatabaseTab(remoteConfig);
-#else
-    emit messageGlobal(tr("WebDAV support is not available in this build."), MessageWidget::Error);
-#endif
-}
-
 /**
  * Add a new database tab or switch to an existing one if the
  * database has been opened already.
@@ -191,50 +158,29 @@ void DatabaseTabWidget::openWebDavDatabase()
  * @param keyfile optional, path to keyfile to unlock database
  *
  */
+void DatabaseTabWidget::openWebDavDatabase()
+{
+#ifdef KPXC_FEATURE_WEBDAV
+    WebDavOpenDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    const auto remote = dialog.remoteConfig();
+    storeWebDavSettings(remote);
+    addWebDavDatabaseTab(WebDavClient::normalizePath(remote.url), false, {}, {});
+#else
+    emit messageGlobal(tr("WebDAV support is not available in this build."), MessageWidget::Error);
+#endif
+}
+
 void DatabaseTabWidget::addDatabaseTab(const QString& filePath,
                                        bool inBackground,
                                        const QString& password,
                                        const QString& keyfile)
 {
 #ifdef KPXC_FEATURE_WEBDAV
-    QUrl remoteUrl(filePath);
-    if (remoteUrl.isValid() && WebDavClient::isWebDavScheme(remoteUrl.scheme())) {
-        const QString normalized = WebDavClient::normalizePath(remoteUrl);
-        Database::RemoteFileConfig remoteConfig = storedWebDavConfig(normalized);
-
-        if (remoteConfig.rememberCredentials && remoteConfig.useAuthentication) {
-            remoteConfig.url = QUrl(normalized);
-            addDatabaseTab(remoteConfig, inBackground, password, keyfile);
-            return;
-        }
-
-        WebDavOpenDialog dialog(this);
-        Database::RemoteFileConfig dialogConfig;
-        dialogConfig.type = Database::RemoteFileConfig::Type::WebDav;
-        dialogConfig.url = QUrl(normalized);
-        if (remoteConfig.type == Database::RemoteFileConfig::Type::WebDav) {
-            dialogConfig = remoteConfig;
-            dialogConfig.url = QUrl(normalized);
-        }
-        dialog.setInitialConfig(dialogConfig);
-        if (dialog.exec() != QDialog::Accepted) {
-            return;
-        }
-        remoteConfig = dialog.remoteConfig();
-        if (!remoteConfig.url.isValid()) {
-            remoteConfig.url = QUrl(normalized);
-        } else {
-            remoteConfig.url = QUrl(WebDavClient::normalizePath(remoteConfig.url));
-        }
-        remoteConfig.type = Database::RemoteFileConfig::Type::WebDav;
-
-        if (remoteConfig.rememberCredentials && remoteConfig.useAuthentication) {
-            rememberWebDavConfig(remoteConfig);
-        } else {
-            forgetWebDavConfig(normalized);
-        }
-
-        addDatabaseTab(remoteConfig, inBackground, password, keyfile);
+    if (WebDavClient::isWebDavUrl(filePath)) {
+        addWebDavDatabaseTab(filePath, inBackground, password, keyfile);
         return;
     }
 #endif
@@ -269,60 +215,57 @@ void DatabaseTabWidget::addDatabaseTab(const QString& filePath,
     updateLastDatabases(dbWidget->database());
 }
 
-void DatabaseTabWidget::addDatabaseTab(const Database::RemoteFileConfig& remoteConfig,
-                                       bool inBackground,
-                                       const QString& password,
-                                       const QString& keyfile)
-{
 #ifdef KPXC_FEATURE_WEBDAV
-    if (remoteConfig.type != Database::RemoteFileConfig::Type::WebDav || !remoteConfig.url.isValid()) {
-        return;
+void DatabaseTabWidget::storeWebDavSettings(const Database::RemoteFileConfig& remote)
+{
+    if (!WebDavCredentials::instance()->store(remote)) {
+        emit messageGlobal(tr("The WebDAV password could not be saved in the system keyring, it will be asked "
+                              "again next time."),
+                           MessageWidget::Warning);
     }
+}
 
-    const QString normalized = WebDavClient::normalizePath(remoteConfig.url);
+void DatabaseTabWidget::addWebDavDatabaseTab(const QString& url,
+                                             bool inBackground,
+                                             const QString& password,
+                                             const QString& keyfile)
+{
+    auto path = WebDavClient::normalizePath(QUrl(url));
 
-    if (remoteConfig.rememberCredentials && remoteConfig.useAuthentication) {
-        rememberWebDavConfig(remoteConfig);
+    // Like KeePass 2: ask for the connection settings unless they are known for this URL
+    Database::RemoteFileConfig remote;
+    if (!WebDavCredentials::instance()->lookup(QUrl(path), remote)
+        || (remote.useAuthentication && remote.password.isEmpty())) {
+        remote.type = Database::RemoteFileConfig::Type::WebDav;
+        remote.url = QUrl(path);
+        WebDavOpenDialog dialog(this);
+        dialog.setInitialConfig(remote);
+        if (dialog.exec() != QDialog::Accepted) {
+            return;
+        }
+        remote = dialog.remoteConfig();
+        storeWebDavSettings(remote);
+        path = WebDavClient::normalizePath(remote.url);
     }
 
     for (int i = 0, c = count(); i < c; ++i) {
-        auto* existingWidget = databaseWidgetFromIndex(i);
-        if (!existingWidget || !existingWidget->database()->hasRemoteFile()) {
-            continue;
-        }
-        const QString existingNormalized =
-            WebDavClient::normalizePath(existingWidget->database()->remoteFileConfig().url);
-        if (existingNormalized == normalized) {
-            existingWidget->database()->setRemoteFileConfig(remoteConfig);
+        auto* dbWidget = databaseWidgetFromIndex(i);
+        if (dbWidget && dbWidget->database()->filePath() == path) {
+            dbWidget->performUnlockDatabase(password, keyfile);
             if (!inBackground) {
-                setCurrentIndex(indexOf(existingWidget));
-            }
-            if (!password.isEmpty() || !keyfile.isEmpty()) {
-                existingWidget->performUnlockDatabase(password, keyfile);
-            } else {
-                existingWidget->switchToOpenDatabase();
+                // switch to existing tab if the database is already open
+                setCurrentIndex(indexOf(dbWidget));
             }
             return;
         }
     }
 
-    auto database = QSharedPointer<Database>::create();
-    database->setRemoteFileConfig(remoteConfig);
-    database->setFilePath(normalized);
-
-    auto* dbWidget = new DatabaseWidget(database, this);
+    auto* dbWidget = new DatabaseWidget(QSharedPointer<Database>::create(path), this);
     addDatabaseTab(dbWidget, inBackground);
-    if (!password.isEmpty() || !keyfile.isEmpty()) {
-        dbWidget->performUnlockDatabase(password, keyfile);
-    }
+    dbWidget->performUnlockDatabase(password, keyfile);
     updateLastDatabases(dbWidget->database());
-#else
-    Q_UNUSED(remoteConfig);
-    Q_UNUSED(inBackground);
-    Q_UNUSED(password);
-    Q_UNUSED(keyfile);
-#endif
 }
+#endif
 
 /**
  * Tries to lock the database at the given index and if
@@ -391,142 +334,6 @@ void DatabaseTabWidget::addDatabaseTab(DatabaseWidget* dbWidget, bool inBackgrou
             this,
             &DatabaseTabWidget::unlockDatabaseInDialogForSync);
 }
-
-#ifdef KPXC_FEATURE_WEBDAV
-void DatabaseTabWidget::loadWebDavCredentials()
-{
-    m_webDavCredentials.clear();
-
-    const QVariantHash stored = config()->get(Config::LastWebDavCredentials).toHash();
-    for (auto it = stored.constBegin(); it != stored.constEnd(); ++it) {
-        const QString normalized = it.key();
-        const QVariantHash entry = it.value().toHash();
-
-        Database::RemoteFileConfig config;
-        config.type = Database::RemoteFileConfig::Type::WebDav;
-        config.url = QUrl(normalized);
-        config.useAuthentication = entry.value(QStringLiteral("useAuthentication"), true).toBool();
-        config.username = entry.value(QStringLiteral("username")).toString();
-        config.password = entry.value(QStringLiteral("password")).toString();
-        config.timeoutMsec = entry.value(QStringLiteral("timeout"), 30000).toInt();
-        config.rememberCredentials = entry.value(QStringLiteral("remember"), true).toBool();
-
-        if (!config.url.isValid()) {
-            config.url = QUrl(normalized);
-        }
-
-        if (!config.rememberCredentials || !config.useAuthentication) {
-            continue;
-        }
-
-        m_webDavCredentials.insert(normalized, config);
-    }
-}
-
-void DatabaseTabWidget::persistWebDavCredentials() const
-{
-    QVariantHash stored;
-    for (auto it = m_webDavCredentials.constBegin(); it != m_webDavCredentials.constEnd(); ++it) {
-        const auto& config = it.value();
-        if (!config.rememberCredentials || !config.useAuthentication) {
-            continue;
-        }
-
-        QVariantHash entry;
-        entry.insert(QStringLiteral("useAuthentication"), config.useAuthentication);
-        entry.insert(QStringLiteral("username"), config.username);
-        entry.insert(QStringLiteral("password"), config.password);
-        entry.insert(QStringLiteral("timeout"), config.timeoutMsec);
-        entry.insert(QStringLiteral("remember"), config.rememberCredentials);
-
-        stored.insert(it.key(), entry);
-    }
-
-    if (stored.isEmpty()) {
-        config()->remove(Config::LastWebDavCredentials);
-    } else {
-        config()->set(Config::LastWebDavCredentials, stored);
-    }
-}
-
-Database::RemoteFileConfig DatabaseTabWidget::storedWebDavConfig(const QString& normalizedPath) const
-{
-    auto it = m_webDavCredentials.constFind(normalizedPath);
-    if (it != m_webDavCredentials.constEnd()) {
-        return it.value();
-    }
-
-    Database::RemoteFileConfig config;
-    config.type = Database::RemoteFileConfig::Type::WebDav;
-    config.url = QUrl(normalizedPath);
-    if (config.timeoutMsec <= 0) {
-        config.timeoutMsec = 30000;
-    }
-    return config;
-}
-
-Database::RemoteFileConfig DatabaseTabWidget::mergeStoredWebDavCredentials(
-    const QString& normalizedWebDavPath,
-    const Database::RemoteFileConfig& current) const
-{
-    Database::RemoteFileConfig merged = current;
-    const Database::RemoteFileConfig stored = storedWebDavConfig(normalizedWebDavPath);
-    if (WebDavClient::isDebugEnabled()) {
-        WebDavClient::debugLog(
-            QStringLiteral("mergeStoredWebDavCredentials: norm=%1 inTabHash=%2 storedRemember=%3 storedUseAuth=%4 "
-                           "inMemUserEmpty=%5 inMemPassEmpty=%6")
-                .arg(normalizedWebDavPath)
-                .arg(m_webDavCredentials.contains(normalizedWebDavPath))
-                .arg(stored.rememberCredentials)
-                .arg(stored.useAuthentication)
-                .arg(current.username.isEmpty())
-                .arg(current.password.isEmpty()));
-    }
-    if (!stored.rememberCredentials || !stored.useAuthentication) {
-        return merged;
-    }
-    const bool missingCreds =
-        !merged.useAuthentication || merged.username.isEmpty() || merged.password.isEmpty();
-    if (!missingCreds || stored.username.isEmpty() || stored.password.isEmpty()) {
-        return merged;
-    }
-    merged.type = Database::RemoteFileConfig::Type::WebDav;
-    merged.useAuthentication = true;
-    merged.username = stored.username;
-    merged.password = stored.password;
-    merged.rememberCredentials = stored.rememberCredentials;
-    if (merged.timeoutMsec <= 0 && stored.timeoutMsec > 0) {
-        merged.timeoutMsec = stored.timeoutMsec;
-    }
-    return merged;
-}
-
-void DatabaseTabWidget::rememberWebDavConfig(const Database::RemoteFileConfig& config)
-{
-    if (config.type != Database::RemoteFileConfig::Type::WebDav || !config.url.isValid()
-        || !config.rememberCredentials || !config.useAuthentication) {
-        return;
-    }
-
-    const QString key = WebDavClient::normalizePath(config.url);
-    Database::RemoteFileConfig stored = config;
-    stored.url = QUrl(key);
-    stored.rememberCredentials = true;
-    if (stored.timeoutMsec <= 0) {
-        stored.timeoutMsec = 30000;
-    }
-
-    m_webDavCredentials.insert(key, stored);
-    persistWebDavCredentials();
-}
-
-void DatabaseTabWidget::forgetWebDavConfig(const QString& normalizedPath)
-{
-    if (m_webDavCredentials.remove(normalizedPath) > 0) {
-        persistWebDavCredentials();
-    }
-}
-#endif
 
 void DatabaseTabWidget::importFile()
 {
@@ -1154,18 +961,11 @@ void DatabaseTabWidget::updateLastDatabases(const QSharedPointer<Database>& data
         return;
     }
     auto filename = database->filePath();
-#ifdef KPXC_FEATURE_WEBDAV
-    if (!database->hasRemoteFile()) {
-        filename = QDir::toNativeSeparators(filename);
-    }
-#else
-    filename = QDir::toNativeSeparators(filename);
-#endif
     if (!config()->get(Config::RememberLastDatabases).toBool()) {
         config()->remove(Config::LastDatabases);
     } else {
         QStringList lastDatabases = config()->get(Config::LastDatabases).toStringList();
-        lastDatabases.prepend(filename);
+        lastDatabases.prepend(database->hasRemoteFile() ? filename : QDir::toNativeSeparators(filename));
         lastDatabases.removeDuplicates();
 
         while (lastDatabases.count() > config()->get(Config::NumberOfRememberedLastDatabases).toInt()) {

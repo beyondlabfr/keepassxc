@@ -22,19 +22,19 @@
 #include <QCloseEvent>
 #include <QDesktopServices>
 #include <QDir>
-#include <QHBoxLayout>
 #include <QFileInfo>
+#include <QHBoxLayout>
 #include <QList>
 #include <QMimeData>
-#include <QSizePolicy>
 #include <QShortcut>
+#include <QSizePolicy>
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolButton>
 #include <QWindow>
 #ifdef KPXC_FEATURE_WEBDAV
-#include <QUrl>
 #include "core/remote/WebDavClient.h"
+#include <QUrl>
 #endif
 
 #include <algorithm>
@@ -706,8 +706,7 @@ void MainWindow::restoreConfigState()
                 continue;
             }
 #ifdef KPXC_FEATURE_WEBDAV
-            const QUrl urlCandidate(filename);
-            if (urlCandidate.isValid() && WebDavClient::isWebDavScheme(urlCandidate.scheme())) {
+            if (WebDavClient::isWebDavUrl(filename)) {
                 openDatabase(filename);
                 continue;
             }
@@ -1759,8 +1758,9 @@ void MainWindow::setAllowScreenCapture(bool state)
                 osUtils->setPreventScreenCapture(window, false);
             }
         }
-        displayGlobalMessage(QObject::tr("Warning: Failed to block screenshot capture. Falling back to allowing screen capture."),
-                             MessageWidget::Error);
+        displayGlobalMessage(
+            QObject::tr("Warning: Failed to block screenshot capture. Falling back to allowing screen capture."),
+            MessageWidget::Error);
     }
 
     m_ui->actionAllowScreenCapture->blockSignals(true);

@@ -1,5 +1,5 @@
-#ifndef KEEPASSX_WEBDAVOPENDIALOG_H
-#define KEEPASSX_WEBDAVOPENDIALOG_H
+#ifndef KEEPASSXC_WEBDAVOPENDIALOG_H
+#define KEEPASSXC_WEBDAVOPENDIALOG_H
 
 #include <QDialog>
 #include <QScopedPointer>
@@ -9,7 +9,7 @@
 
 namespace Ui
 {
-class WebDavOpenDialog;
+    class WebDavOpenDialog;
 }
 
 class WebDavOpenDialog : public QDialog
@@ -27,7 +27,7 @@ public slots:
     void accept() override;
 
 private slots:
-    void updateAcceptState();
+    void updateState();
 
 private:
     bool updateRemoteConfig();
@@ -36,5 +36,4 @@ private:
     Database::RemoteFileConfig m_remoteConfig;
 };
 
-#endif // KEEPASSX_WEBDAVOPENDIALOG_H
-
+#endif // KEEPASSXC_WEBDAVOPENDIALOG_H
