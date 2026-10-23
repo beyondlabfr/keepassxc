@@ -145,7 +145,8 @@ fi
 
 echo "==> Installation dans le staging (${STAGING})…"
 rm -rf "${STAGING}"
-DESTDIR="${STAGING}" cmake --install "${BUILD_DIR}" --prefix "${PREFIX}"
+# --strip : sans lui, les symboles de débogage de RelWithDebInfo font passer le .deb de ~10 à 50 Mo
+DESTDIR="${STAGING}" cmake --install "${BUILD_DIR}" --prefix "${PREFIX}" --strip
 
 mkdir -p "${STAGING}/DEBIAN"
 INSTALLED_SIZE=0
@@ -167,23 +168,27 @@ done < <(find "${STAGING}" -path "${STAGING}/DEBIAN" -prune -o -type f -print0 2
 
 DEPENDS_LINE=""
 MULTIARCH="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)"
-SUBST="${STAGING}/DEBIAN/substvars"
+SUBST="${BUILD_DIR}/substvars"
 rm -f "${SUBST}"
 if [[ ${#SHLIB_BINS[@]} -gt 0 ]] && command -v dpkg-shlibdeps >/dev/null 2>&1; then
   rel_bins=()
   for f in "${SHLIB_BINS[@]}"; do
     rel_bins+=("${f#"${STAGING}/"}")
   done
+  # dpkg-shlibdeps exige un debian/control dans le répertoire courant : on en fournit un minimal, retiré ensuite
+  mkdir -p "${STAGING}/debian"
+  printf 'Source: %s\n\nPackage: %s\nArchitecture: any\n' "${DEB_PACKAGE_NAME}" "${DEB_PACKAGE_NAME}" > "${STAGING}/debian/control"
   set +e
   (
     cd "${STAGING}"
     if [[ -n "${MULTIARCH}" && -d "${PREFIX#/}/lib/${MULTIARCH}" ]]; then
-      dpkg-shlibdeps -T"DEBIAN/substvars" -l"${PREFIX#/}/lib/${MULTIARCH}" "${rel_bins[@]}" 2>/dev/null
+      dpkg-shlibdeps -T"${SUBST}" -l"${PREFIX#/}/lib/${MULTIARCH}" "${rel_bins[@]}"
     else
-      dpkg-shlibdeps -T"DEBIAN/substvars" "${rel_bins[@]}" 2>/dev/null
+      dpkg-shlibdeps -T"${SUBST}" "${rel_bins[@]}"
     fi
   )
   set -e
+  rm -rf "${STAGING}/debian"
   if [[ -f "${SUBST}" ]]; then
     DEPENDS_LINE="$(grep -E '^shlibs:Depends=' "${SUBST}" | cut -d= -f2- || true)"
   fi
