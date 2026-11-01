@@ -7,3 +7,6 @@ set(VCPKG_OSX_ARCHITECTURES x86_64)
 
 set(VCPKG_BUILD_TYPE release)
 set(VCPKG_OSX_DEPLOYMENT_TARGET 10.15)
+
+# Qt checks the Xcode version, which fails with the Command Line Tools alone (no Xcode installed)
+list(APPEND VCPKG_CMAKE_CONFIGURE_OPTIONS -DQT_NO_XCODE_MIN_VERSION_CHECK=ON)
