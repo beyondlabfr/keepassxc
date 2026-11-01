@@ -62,6 +62,9 @@ $cmakeArgs = @(
     "-G", "Ninja",
     # Qt6 (and QtKeychain) built by vcpkg, see the "qt" feature of vcpkg.json
     "-DWITH_BUILD_QT=ON",
+    # Offline documentation needs asciidoctor, tests are run on Linux
+    "-DKPXC_FEATURE_DOCS=OFF",
+    "-DWITH_TESTS=OFF",
     "-DKEEPASSXC_BUILD_TYPE=$KeePassXCBuildType",
     "-DCMAKE_BUILD_TYPE=$BuildType",
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
