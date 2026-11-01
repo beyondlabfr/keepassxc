@@ -65,6 +65,9 @@ $cmakeArgs = @(
     # Offline documentation needs asciidoctor, tests are run on Linux
     "-DKPXC_FEATURE_DOCS=OFF",
     "-DWITH_TESTS=OFF",
+    # vcpkg builds every dependency (Qt included) in release only: half the time of x64-windows
+    "-DVCPKG_TARGET_TRIPLET=x64-windows-release",
+    "-DVCPKG_HOST_TRIPLET=x64-windows-release",
     "-DKEEPASSXC_BUILD_TYPE=$KeePassXCBuildType",
     "-DCMAKE_BUILD_TYPE=$BuildType",
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
