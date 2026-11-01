@@ -85,7 +85,9 @@ else
   PKG_VERSION="${BASE_VERSION}-${DEB_REVISION}"
   if [[ -d "${ROOT}/.git" ]]; then
     GIT_SHORT="$(git -C "${ROOT}" rev-parse --short HEAD 2>/dev/null || true)"
-    [[ -n "${GIT_SHORT}" ]] && PKG_VERSION="${BASE_VERSION}-${DEB_REVISION}~git${GIT_SHORT}"
+    # Date du commit (UTC) avant le hash : apt classe les versions, un hash seul ne se classe pas
+    GIT_DATE="$(TZ=UTC git -C "${ROOT}" log -1 --format=%cd --date=format-local:%Y%m%d%H%M 2>/dev/null || true)"
+    [[ -n "${GIT_SHORT}" ]] && PKG_VERSION="${BASE_VERSION}-${DEB_REVISION}~git${GIT_DATE}.${GIT_SHORT}"
   fi
 fi
 
