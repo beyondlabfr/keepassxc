@@ -502,9 +502,15 @@ if(APPLE)
         # vcpkg installs *deployqt to the host triplet install dir, which prevents it from
         # finding the Qt libraries and plugins from the target triplet install dir.
         # Here, we copy it to the target dir to fix that. A qt.conf exists there already.
-        set(_host_triplet "${CMAKE_HOST_SYSTEM_PROCESSOR}-${CMAKE_HOST_SYSTEM_NAME}")
-        string(TOLOWER "${_host_triplet}" _host_triplet)
-        string(REPLACE "darwin" "osx" _host_triplet "${_host_triplet}")
+        # As on Windows, take vcpkg's own host triplet: deriving it from CMAKE_HOST_SYSTEM_PROCESSOR
+        # gives "x86_64-osx" on Intel Macs, which is no vcpkg triplet name ("x64-osx...").
+        if(VCPKG_HOST_TRIPLET)
+            set(_host_triplet "${VCPKG_HOST_TRIPLET}")
+        else()
+            set(_host_triplet "${CMAKE_HOST_SYSTEM_PROCESSOR}-${CMAKE_HOST_SYSTEM_NAME}")
+            string(TOLOWER "${_host_triplet}" _host_triplet)
+            string(REPLACE "darwin" "osx" _host_triplet "${_host_triplet}")
+        endif()
     endif()
 elseif(WIN32)
     set(_deployqt_exe_name windeployqt.exe)
