@@ -62,8 +62,7 @@ $cmakeArgs = @(
     "-G", "Ninja",
     # Qt6 (and QtKeychain) built by vcpkg, see the "qt" feature of vcpkg.json
     "-DWITH_BUILD_QT=ON",
-    # Offline documentation needs asciidoctor, tests are run on Linux
-    "-DKPXC_FEATURE_DOCS=OFF",
+    # Tests are run on Linux
     "-DWITH_TESTS=OFF",
     # vcpkg builds every dependency (Qt included) in release only: half the time of x64-windows
     "-DVCPKG_TARGET_TRIPLET=x64-windows-release",
@@ -73,6 +72,16 @@ $cmakeArgs = @(
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
     ".."
 )
+
+# Offline documentation (also linked from the MSI Start menu) needs asciidoctor. RubyInstaller ships it
+# as asciidoctor.bat, which CMake's find_program does not look for on Windows: pass it explicitly.
+$asciidoctor = Get-Command asciidoctor -ErrorAction SilentlyContinue
+if ($asciidoctor) {
+    $cmakeArgs = @("-DKPXC_FEATURE_DOCS=ON", "-DASCIIDOCTOR_EXE=$($asciidoctor.Source)") + $cmakeArgs
+} else {
+    Write-Warning "asciidoctor not found: building without offline documentation (the MSI needs it)"
+    $cmakeArgs = @("-DKPXC_FEATURE_DOCS=OFF") + $cmakeArgs
+}
 
 Write-Host "Repo: $repoRoot"
 Write-Host "Build: $buildPath"
