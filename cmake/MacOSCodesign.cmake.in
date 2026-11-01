@@ -29,6 +29,23 @@ if(NOT CPACK_PACKAGE_FILES)     # PRE_BUILD: Sign binaries
     message(STATUS "Codesign identity used: ${CODESIGN_IDENTITY}")
     message(STATUS "Signing ${PROGNAME}.app, this may take while...")
 
+    # Ad-hoc signature ("-"), without an Apple account: seal the whole bundle once it is deployed,
+    # otherwise macOS reports the app as damaged (and Apple Silicon refuses to run it). No hardened
+    # runtime nor entitlements: they carry the KeePassXC team ID and need its provisioning profile.
+    if(CODESIGN_IDENTITY STREQUAL "-")
+        execute_process(
+            COMMAND xcrun codesign --sign=- --force --deep "${APP_DIR}"
+            RESULT_VARIABLE SIGN_RESULT
+            ERROR_VARIABLE SIGN_ERROR
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
+        if (NOT SIGN_RESULT EQUAL 0)
+            message(FATAL_ERROR "Ad-hoc signing failed: ${SIGN_ERROR}")
+        endif()
+        message(STATUS "${PROGNAME}.app signed ad-hoc.")
+        return()
+    endif()
+
     # Sign all binaries
     execute_process(
         COMMAND xcrun codesign --sign=${CODESIGN_IDENTITY} --force --options=runtime --deep "${APP_DIR}"

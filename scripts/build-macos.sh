@@ -8,6 +8,8 @@
 #
 # Variables : VCPKG_ROOT (défaut ~/vcpkg), BUILD_DIR (défaut <racine>/build-macos-<arch>),
 #             JOBS (défaut : nombre de cœurs), MACOS_TARGET (défaut 12, comme l'upstream)
+#             CODESIGN_IDENTITY (défaut « - » : signature ad hoc, sans compte Apple ; sinon le nom
+#             d'un certificat « Developer ID Application » du trousseau)
 # Prérequis : Command Line Tools (Xcode complet inutile), cmake, ninja, pkg-config, autoconf,
 #             automake, autoconf-archive, libtool ; asciidoctor pour la documentation hors ligne.
 set -euo pipefail
@@ -51,6 +53,7 @@ cmake -S "${ROOT}" -B "${BUILD_DIR}" -G Ninja \
     -DCMAKE_OSX_ARCHITECTURES="${ARCH}" \
     -DCMAKE_OSX_DEPLOYMENT_TARGET="${MACOS_TARGET}" \
     -DKEEPASSXC_BUILD_TYPE=Release \
+    -DWITH_XC_CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}" \
     ${DOCS}
 
 echo "==> Compilation (-j${JOBS})"
