@@ -2,10 +2,13 @@
 
 ## Windows (MSVC + Ninja + vcpkg)
 
-Pré-requis :
-- Visual Studio (MSVC) + CMake + Ninja
-- vcpkg (par défaut `C:\vcpkg`)
-- (optionnel) WiX Toolset (pour générer un MSI)
+Pré-requis (machine de référence : win-compile, voir homelab-docs `machines/win-compile.md`) :
+- Visual Studio (MSVC, outils C++ et CMake) ; Ninja est celui de Visual Studio
+- vcpkg à jour (par défaut `C:\vcpkg`) : il compile Qt6, QtKeychain et les autres dépendances, en release seulement
+  (triplet `x64-windows-release`) ; la première compilation prend environ 2 h 30
+- WiX Toolset **v3** (`candle`/`light`, ex. binaires 3.14 dans `C:\Tools\wix314`) pour le MSI
+- Ruby + `gem install asciidoctor` pour la documentation hors ligne : **le MSI en a besoin** (raccourcis du menu
+  Démarrer vers le guide) ; sans asciidoctor, le script compile sans documentation et seul le ZIP sort
 
 ### Build simple (exe dans le dossier de build)
 
