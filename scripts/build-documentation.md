@@ -88,6 +88,29 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1 -Jobs 12
 ```
 
+## macOS (.dmg)
+
+```bash
+scripts/build-macos.sh            # architecture de la machine
+scripts/build-macos.sh arm64      # Apple Silicon, possible depuis un Mac Intel
+```
+
+Pré-requis (machine d'essai : VM macos-tahoe, voir homelab-docs `machines/macos-tahoe.md`) :
+- **Command Line Tools** seuls (`xcode-select --install`, ou `softwareupdate -i "Command Line Tools for Xcode …"`) :
+  Xcode complet inutile, les triplets passent `QT_NO_XCODE_MIN_VERSION_CHECK` à Qt.
+- cmake, ninja, pkg-config, autoconf, automake, autoconf-archive, libtool, asciidoctor. Homebrew refuse désormais
+  les Mac Intel : MacPorts y fait l'affaire.
+- vcpkg (`~/vcpkg` par défaut) : Qt6 et les dépendances en release. Sur un Mac Intel, viser arm64 compile Qt deux
+  fois (outils pour la machine, bibliothèques pour la cible).
+
+Signature : sans certificat, l'application entière est signée ad hoc (`CODESIGN_IDENTITY=-`, défaut) après le
+déploiement de Qt ; macOS demandera une autorisation à la première ouverture (clic droit, Ouvrir). Avec un
+certificat « Developer ID Application » : `CODESIGN_IDENTITY="Developer ID Application: …"`, chemin de l'upstream
+(hardened runtime, droits de `share/macosx/keepassxc.entitlements` à adapter à l'équipe Apple).
+
+Durées mesurées sur la VM Intel (8 cœurs Broadwell émulés) : x86_64 1 h 40 de dépendances + 11 min de KeePassXC ;
+arm64 croisé 1 h 50 de plus.
+
 ## Ubuntu / Debian (.deb)
 
 ### Pré-requis (Ubuntu 24.04)
