@@ -535,7 +535,10 @@ endif()
 
 if(_deployqt_exe_name)
     # Check if the Qt host path is specified or if we need to determine it based on the build configuration
-    if(QT_HOST_PATH)
+    # On macOS, macdeployqt deploys the plugins of the Qt it finds through the qt.conf next to it: when
+    # vcpkg cross-compiles (QT_HOST_PATH set, e.g. arm64 on an Intel Mac), the host copy would deploy
+    # host plugins, so the copy into the target tools dir below is needed there too.
+    if(QT_HOST_PATH AND NOT (APPLE AND WITH_BUILD_QT))
         set(Qt6_TOOLS_PREFIX "${QT_HOST_PATH}")
     elseif(WITH_BUILD_QT)
         get_filename_component(Qt6_TOOLS_PREFIX "${Qt6_PREFIX}/tools/Qt6" REALPATH)
@@ -544,6 +547,14 @@ if(_deployqt_exe_name)
             file(COPY
                 "${VCPKG_INSTALLED_DIR}/${_host_triplet}/tools/Qt6/bin/${_deployqt_exe_name}"
                 DESTINATION "${Qt6_TOOLS_PREFIX}/bin")
+            if(APPLE)
+                # The copy must still load the host Qt libraries: dyld skips the target ones when their
+                # architecture differs and falls back to this path. Re-sign since the binary changed.
+                set(_copied_deployqt "${Qt6_TOOLS_PREFIX}/bin/${_deployqt_exe_name}")
+                execute_process(COMMAND install_name_tool -add_rpath "${VCPKG_INSTALLED_DIR}/${_host_triplet}/lib"
+                                        "${_copied_deployqt}" ERROR_QUIET)
+                execute_process(COMMAND codesign --force --sign - "${_copied_deployqt}" ERROR_QUIET)
+            endif()
         endif()
     else()
         get_filename_component(Qt6_TOOLS_PREFIX "${Qt6_PREFIX}" REALPATH)
