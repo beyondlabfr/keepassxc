@@ -534,13 +534,10 @@ elseif(WIN32)
 endif()
 
 if(_deployqt_exe_name)
-    # Check if the Qt host path is specified or if we need to determine it based on the build configuration
-    # On macOS, macdeployqt deploys the plugins of the Qt it finds through the qt.conf next to it: when
-    # vcpkg cross-compiles (QT_HOST_PATH set, e.g. arm64 on an Intel Mac), the host copy would deploy
-    # host plugins, so the copy into the target tools dir below is needed there too.
-    if(QT_HOST_PATH AND NOT (APPLE AND WITH_BUILD_QT))
-        set(Qt6_TOOLS_PREFIX "${QT_HOST_PATH}")
-    elseif(WITH_BUILD_QT)
+    # The deployment tool must run beside the target qt.conf when using vcpkg, so it deploys
+    # the target plugins rather than looking in the host tools installation.
+    if(WITH_BUILD_QT)
+        unset(DEPLOYQT_EXE CACHE)
         get_filename_component(Qt6_TOOLS_PREFIX "${Qt6_PREFIX}/tools/Qt6" REALPATH)
         # If the host architecture differs from the target architecture, copy the appropriate deployqt executable
         if(NOT _host_triplet STREQUAL VCPKG_TARGET_TRIPLET)
@@ -556,6 +553,8 @@ if(_deployqt_exe_name)
                 execute_process(COMMAND codesign --force --sign - "${_copied_deployqt}" ERROR_QUIET)
             endif()
         endif()
+    elseif(QT_HOST_PATH)
+        set(Qt6_TOOLS_PREFIX "${QT_HOST_PATH}")
     else()
         get_filename_component(Qt6_TOOLS_PREFIX "${Qt6_PREFIX}" REALPATH)
     endif()
